@@ -34,9 +34,13 @@ class DanserConfig:
     
     def to_danser_args(self, beatmap: Beatmap, difficulty: Difficulty) -> str:
         """Convert config to danser command line arguments"""
-        args = []
-        args.append(f'-title="{beatmap.title}"')
-        args.append(f'-difficulty="{difficulty.metadata.version}"')
+        args = [
+            f'-title="{beatmap.title}"',
+            f'-difficulty="{difficulty.metadata.version}"',
+            "-noupdatecheck",
+            "-preciseprogress"
+        ]
+        
         if self.speed != 1.0:
             args.append(f'-speed={self.speed}')
         if self.pitch != 1.0:
@@ -49,23 +53,18 @@ class DanserConfig:
             args.append('-skip')
         if self.quickstart:
             args.append('-quickstart')
-        
         if self.record:
             args.append('-record')
         if self.output_name:
-            args.append(f'-out="{self.output_dir}\\{self.output_name}"')
-        
+            args.append(f'-out="..\\..\\{self.output_dir}\\{self.output_name.replace(".mp4", "")}"')
         if self.cursors > 1:
             args.append(f'-cursors={self.cursors}')
         if self.tag > 1:
             args.append(f'-tag={self.tag}')
-        
         if self.mods:
             args.append(f'-mods={self.mods}')
-        
         if self.skin:
             args.append(f'-skin={self.skin}')
-        
         if self.circle_size is not None:
             args.append(f'-cs={self.circle_size}')
         if self.approach_rate is not None:
@@ -74,6 +73,5 @@ class DanserConfig:
             args.append(f'-od={self.overall_difficulty}')
         if self.hp_drain is not None:
             args.append(f'-hp={self.hp_drain}')
-        args.append("-noupdatecheck")
-        args.append("-preciseprogress")
+            
         return " ".join(args) 

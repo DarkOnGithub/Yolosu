@@ -14,6 +14,16 @@ class SliderBall:
         self.x = x
         self.y = y
         self.time = time
+        
+    def get_bounding_box(self, radius: float) -> Tuple[float, float, float, float]:
+        """Get the bounding box of the slider ball (x1, y1, x2, y2)"""
+        ball_radius = radius * 0.8  
+        return (
+            self.x - ball_radius,
+            self.y - ball_radius,
+            self.x + ball_radius,
+            self.y + ball_radius
+        )
 
 class Slider(HitObject):
     """Represents a slider in osu!"""
@@ -67,7 +77,7 @@ class Slider(HitObject):
             max(y_coords) + radius   
         )
         
-    def calculate_path_points(self, num_points: int = 100) -> List[Tuple[float, float]]:
+    def calculate_path_points(self, num_points: int = 300) -> List[Tuple[float, float]]:
         """Calculate the points along the slider path"""
         if self._path_points is not None and len(self._path_points) == num_points:
             return self._path_points
@@ -104,7 +114,6 @@ class Slider(HitObject):
             )
         elif self.curve_type == CurveType.CATMULL:
             if len(control_points) < 4:
-                
                 return calculate_bezier_points(control_points, num_points)
                 
             path_points = calculate_catmull_points(
@@ -113,6 +122,26 @@ class Slider(HitObject):
             )
         else:
             raise ValueError(f"Unknown curve type: {self.curve_type}")
+        
+        
+        if len(path_points) > 1:
+            total_length = 0
+            for i in range(1, len(path_points)):
+                dx = path_points[i][0] - path_points[i-1][0]
+                dy = path_points[i][1] - path_points[i-1][1]
+                total_length += (dx*dx + dy*dy) ** 0.5
+            
+            if total_length > 0:
+                scale = self.length / total_length
+                scaled_points = []
+                for x, y in path_points:
+                    dx = x - start_point[0]
+                    dy = y - start_point[1]
+                    scaled_points.append((
+                        start_point[0] + dx * scale,
+                        start_point[1] + dy * scale
+                    ))
+                path_points = scaled_points
         
         self._path_points = path_points
         return path_points
@@ -137,15 +166,24 @@ class Slider(HitObject):
             slide_number = self.slides - 1
             slide_progress = 1.0
         
-        path_points = self.calculate_path_points(100)  
+        path_points = self.calculate_path_points(300)  
         
         if slide_number % 2 == 1:  
             slide_progress = 1.0 - slide_progress  
             
-        point_index = int(slide_progress * (len(path_points) - 1))
-        point_index = max(0, min(point_index, len(path_points) - 1))  
-        point = path_points[point_index]
-        self.ball.update_position(point[0], point[1], current_time)
+        
+        point_index = slide_progress * (len(path_points) - 1)
+        index1 = int(point_index)
+        index2 = min(index1 + 1, len(path_points) - 1)
+        t = point_index - index1
+        
+        p1 = path_points[index1]
+        p2 = path_points[index2]
+        
+        x = p1[0] + t * (p2[0] - p1[0])
+        y = p1[1] + t * (p2[1] - p1[1])
+        
+        self.ball.update_position(x, y, current_time)
         
     @classmethod
     def from_line(cls, line: str) -> 'Slider':

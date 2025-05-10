@@ -58,8 +58,17 @@ class Player:
         output_name = f"{beatmap_name}_{self.difficulty.metadata.version}.mp4"
         output_path = os.path.join(self.config.output_dir, output_name)
         
+        if os.path.exists(output_path):
+            cap = cv2.VideoCapture(output_path)
+            if cap.isOpened():
+                width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+                height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+                cap.release()
+                if width == self.config.width and height == self.config.height:
+                    logging.info(f"Video already exists with same resolution: {output_path}")
+                    return output_path
+        
         self.config.output_name = output_name
-
 
         base_dir = os.path.dirname(os.path.dirname(__file__))
 
@@ -67,6 +76,8 @@ class Player:
         danser_settings_path = os.path.join(settings_dir, "danser_settings.json")
         default_settings_path = os.path.join(base_dir, "danser", "settings", "default.json")
 
+        os.makedirs(settings_dir, exist_ok=True)
+        
         with open(default_settings_path, 'r') as f:
             settings = json.load(f)
             
@@ -85,6 +96,8 @@ class Player:
         settings['Recording']['FrameHeight'] = self.config.height
         settings['Recording']['FPS'] = self.config.fps
         settings['Recording']['custom']["CustomOptions"] = "-an"  
+        
+        settings['Playfield']['SeizureWarning']['Enabled'] = False
 
         with open(danser_settings_path, 'w') as f:
             json.dump(settings, f, indent='\t')
@@ -151,6 +164,25 @@ class Player:
             elif obj.curve_type == CurveType.CATMULL:
                 color = (255, 255, 0)
                 
+            
+            current_time = self.start_time + int(self.cap.get(cv2.CAP_PROP_POS_FRAMES) * 1000 / self.fps)
+            if current_time >= obj.time and obj.ball:
+                
+                duration = obj.calculate_duration(
+                    self.difficulty.difficulty.slider_multiplier,
+                    self.difficulty.timing_points.points
+                )
+                obj.update_ball_position(current_time, duration)
+                
+                ball_x1, ball_y1, ball_x2, ball_y2 = obj.ball.get_bounding_box(self.radius)
+                ball_x1, ball_y1 = osu_pixels_to_normal_coords(ball_x1, ball_y1, self.resolution_width, self.resolution_height)
+                ball_x2, ball_y2 = osu_pixels_to_normal_coords(ball_x2, ball_y2, self.resolution_width, self.resolution_height)
+                ball_x1, ball_y1, ball_x2, ball_y2 = map(int, [ball_x1, ball_y1, ball_x2, ball_y2])
+                
+                cv2.rectangle(overlay, (ball_x1, ball_y1), (ball_x2, ball_y2), (255, 255, 255), 2)
+                cv2.putText(overlay, "Ball", (ball_x1, ball_y1-10), 
+                          cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
+                
         cv2.rectangle(overlay, (x1, y1), (x2, y2), color, 2)
         label = obj.__class__.__name__
         cv2.putText(overlay, label, (x1, y1-10), 
@@ -158,22 +190,61 @@ class Player:
         cv2.addWeighted(overlay, alpha, frame, 1 - alpha, 0, frame)
     
     def play(self):
-        """Play the video with bounding boxes"""
+        """Play the video with bounding boxes and player controls"""
         current_frame = 0
+        paused = False
+        playback_speed = 1.0
         
         while True:
-            ret, frame = self.cap.read()
-            if not ret:
-                break
+            if not paused:
+                ret, frame = self.cap.read()
+                if not ret:
+                    break
+                    
+                current_time = self.start_time + int(current_frame * 1000 / self.fps)
+                visible_objects = self.get_current_objects(current_time)
+                for obj in visible_objects:
+                    self.draw_bounding_box(frame, obj)
+                    
                 
-            current_time = self.start_time + int(current_frame * 1000 / self.fps)
-            visible_objects = self.get_current_objects(current_time)
-            for obj in visible_objects:
-                self.draw_bounding_box(frame, obj)
-            cv2.imshow('Osu! Gameplay', frame)
-            if cv2.waitKey(1) & 0xFF == ord('q'):
+                info_text = f"Speed: {playback_speed:.1f}x | Frame: {current_frame}"
+                cv2.putText(frame, info_text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+                
+                cv2.imshow('Osu! Gameplay', frame)
+                current_frame += 1
+            
+            key = cv2.waitKey(int(1000 / (self.fps * playback_speed))) & 0xFF
+            
+            if key == ord('q'):  
                 break
-            current_frame += 1
+            elif key == ord(' '):  
+                paused = not paused
+            elif key == ord('+'):  
+                playback_speed = min(playback_speed + 0.5, 4.0)
+            elif key == ord('-'):  
+                playback_speed = max(playback_speed - 0.5, 0.25)
+            elif key == ord('f'):  
+                if paused:
+                    ret, frame = self.cap.read()
+                    if ret:
+                        current_time = self.start_time + int(current_frame * 1000 / self.fps)
+                        visible_objects = self.get_current_objects(current_time)
+                        for obj in visible_objects:
+                            self.draw_bounding_box(frame, obj)
+                        cv2.imshow('Osu! Gameplay', frame)
+                        current_frame += 1
+            elif key == ord('b'):  
+                if paused and current_frame > 0:
+                    current_frame -= 1
+                    self.cap.set(cv2.CAP_PROP_POS_FRAMES, current_frame)
+                    ret, frame = self.cap.read()
+                    if ret:
+                        current_time = self.start_time + int(current_frame * 1000 / self.fps)
+                        visible_objects = self.get_current_objects(current_time)
+                        for obj in visible_objects:
+                            self.draw_bounding_box(frame, obj)
+                        cv2.imshow('Osu! Gameplay', frame)
+                        
         self.cap.release()
         cv2.destroyAllWindows()
         

@@ -29,26 +29,36 @@ def calculate_perfect_circle_points(a: Tuple[float, float], b: Tuple[float, floa
     if center is None:
         return calculate_linear_points(a, c, num_points)
     
-    start_angle = math.atan2(a[1] - center[1], a[0] - center[0])
-    end_angle = math.atan2(c[1] - center[1], c[0] - center[0])
-    mid_angle = math.atan2(b[1] - center[1], b[0] - center[0])
+    angles = []
+    for point in [a, b, c]:
+        angle = math.atan2(point[1] - center[1], point[0] - center[0])
+        angles.append(angle)
     
-    angle_diff = end_angle - start_angle
-    if angle_diff < 0:
-        angle_diff += 2 * math.pi
+    start_angle = angles[0]
+    mid_angle = angles[1]
+    end_angle = angles[2]
     
-    mid_angle_diff = mid_angle - start_angle
-    if mid_angle_diff < 0:
-        mid_angle_diff += 2 * math.pi
-        
-    if not (0 <= mid_angle_diff <= angle_diff):
-        start_angle, end_angle = end_angle, start_angle
-        angle_diff = 2 * math.pi - angle_diff
+    while start_angle < 0:
+        start_angle += 2 * math.pi
+    while mid_angle < 0:
+        mid_angle += 2 * math.pi
+    while end_angle < 0:
+        end_angle += 2 * math.pi
+    
+    angle_diff1 = (mid_angle - start_angle) % (2 * math.pi)
+    angle_diff2 = (end_angle - mid_angle) % (2 * math.pi)
+    
+    if angle_diff1 > math.pi:
+        angle_diff1 = 2 * math.pi - angle_diff1
+    if angle_diff2 > math.pi:
+        angle_diff2 = 2 * math.pi - angle_diff2
+    
+    total_angle = angle_diff1 + angle_diff2
     
     points = []
     for i in range(num_points):
         t = i / (num_points - 1) if num_points > 1 else 0
-        angle = start_angle + t * angle_diff
+        angle = start_angle + t * total_angle
         x = center[0] + radius * math.cos(angle)
         y = center[1] + radius * math.sin(angle)
         points.append((x, y))
@@ -57,23 +67,26 @@ def calculate_perfect_circle_points(a: Tuple[float, float], b: Tuple[float, floa
 
 def calculate_bezier_points(control_points: List[Tuple[float, float]], num_points: int) -> List[Tuple[float, float]]:
     """Calculate points for a Bezier curve with given control points"""
-    split_points = [0]
+    if len(control_points) < 2:
+        return control_points
+    
+    segments = []
+    current_segment = [control_points[0]]
+    
     for i in range(1, len(control_points)):
-        if control_points[i] == control_points[i-1]:
-            split_points.append(i)
+        if control_points[i] != control_points[i-1]:
+            current_segment.append(control_points[i])
+        else:
+            if len(current_segment) > 1:
+                segments.append(current_segment)
+            current_segment = [control_points[i]]
     
-    split_points.append(len(control_points))
+    if len(current_segment) > 1:
+        segments.append(current_segment)
+    
     all_points = []
-    
-    for i in range(len(split_points) - 1):
-        start = split_points[i]
-        end = split_points[i+1]
-        
-        segment_control_points = control_points[start:end]
-        if len(segment_control_points) < 2:
-            continue
-            
-        segment_points = bezier_curve(segment_control_points, num_points)
+    for segment in segments:
+        segment_points = bezier_curve(segment, num_points // len(segments))
         all_points.extend(segment_points)
     
     if len(all_points) > num_points:
@@ -87,10 +100,19 @@ def calculate_catmull_points(control_points: List[Tuple[float, float]], num_poin
     if len(control_points) < 4:
         return calculate_bezier_points(control_points, num_points)
     
+    padded_points = [control_points[0]] + control_points + [control_points[-1]]
+    
     points = []
-    for i in range(len(control_points) - 3):
-        p0, p1, p2, p3 = control_points[i:i+4]
-        segment_points = catmull_rom_segment(p0, p1, p2, p3, num_points // (len(control_points) - 3))
+    num_segments = len(control_points) - 1
+    points_per_segment = num_points // num_segments
+    
+    for i in range(num_segments):
+        p0 = padded_points[i]
+        p1 = padded_points[i + 1]
+        p2 = padded_points[i + 2]
+        p3 = padded_points[i + 3]
+        
+        segment_points = catmull_rom_segment(p0, p1, p2, p3, points_per_segment)
         points.extend(segment_points)
     
     if len(points) > num_points:
@@ -195,10 +217,11 @@ def catmull_rom_segment(p0: Tuple[float, float], p1: Tuple[float, float],
         t2 = t * t
         t3 = t2 * t
         
-        b0 = 0.5 * (-t3 + 2*t2 - t)
-        b1 = 0.5 * (3*t3 - 5*t2 + 2)
-        b2 = 0.5 * (-3*t3 + 4*t2 + t)
-        b3 = 0.5 * (t3 - t2)
+        
+        b0 = -0.5 * t3 + t2 - 0.5 * t
+        b1 = 1.5 * t3 - 2.5 * t2 + 1.0
+        b2 = -1.5 * t3 + 2.0 * t2 + 0.5 * t
+        b3 = 0.5 * t3 - 0.5 * t2
         
         x = b0 * p0[0] + b1 * p1[0] + b2 * p2[0] + b3 * p3[0]
         y = b0 * p0[1] + b1 * p1[1] + b2 * p2[1] + b3 * p3[1]
