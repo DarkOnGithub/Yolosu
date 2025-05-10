@@ -1,0 +1,8 @@
+beatmaps/
+videos/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.pyw
+danser/
