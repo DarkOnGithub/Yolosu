@@ -5,6 +5,7 @@ from emulator.objects import HitCircle, Slider, Spinner, SliderBall
 from emulator.objects.base import HitObjectType
 from emulator.player import Player
 from emulator.config import DanserConfig
+import setup
 
 handler = colorlog.StreamHandler()
 handler.setFormatter(colorlog.ColoredFormatter(
@@ -28,6 +29,7 @@ handler.setFormatter(colorlog.ColoredFormatter(
     },
     style='%'
 ))
+
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 logger.handlers = [handler]  

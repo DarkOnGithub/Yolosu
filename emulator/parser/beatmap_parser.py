@@ -44,7 +44,6 @@ def find_beatmap(search_term: str, is_full_path: bool = False, beatmaps_dir: str
             continue
         try:
             beatmap_id, title, _= _parse_beatmap_path(os.path.basename(item_path))
-            print(beatmap_id, title, search_term)
             if not is_full_path and str(beatmap_id) == search_term or not is_full_path and search_term.lower() in title.lower() or search_term.lower() in title.lower():
                 return item_path
         except Exception as e:
