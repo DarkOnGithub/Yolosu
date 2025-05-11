@@ -180,18 +180,16 @@ class Player:
             for i, (cx, cy) in enumerate(control_points):
                 cx, cy = osu_pixels_to_normal_coords(cx, cy, self.resolution_width, self.resolution_height)
                 cx, cy = int(cx), int(cy)
-                cv2.circle(overlay, (cx, cy), 5, (255, 0, 255), -1)  # Purple for control points
+                cv2.circle(overlay, (cx, cy), 5, (255, 0, 255), -1)  
                 cv2.putText(overlay, f"CP{i}", (cx+5, cy+5), 
                           cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 255), 2)
             
-            # Draw curve points
-            path_points = obj.calculate_path_points(100)  # Use fewer points for visualization
+            path_points = obj.calculate_path_points(1000) 
             for i, (px, py) in enumerate(path_points):
                 px, py = osu_pixels_to_normal_coords(px, py, self.resolution_width, self.resolution_height)
                 px, py = int(px), int(py)
-                cv2.circle(overlay, (px, py), 2, (0, 255, 255), -1)  # Yellow for curve points
+                cv2.circle(overlay, (px, py), 2, (0, 255, 255), -1)  
                 
-                # Draw lines between curve points
                 if i > 0:
                     prev_px, prev_py = osu_pixels_to_normal_coords(path_points[i-1][0], path_points[i-1][1], 
                                                                  self.resolution_width, self.resolution_height)
@@ -204,14 +202,15 @@ class Player:
                     self.difficulty.difficulty.slider_multiplier,
                     self.difficulty.timing_points.points
                 )
-                obj.update_ball_position(current_time, duration)
+                adjusted_time = current_time - int(16.67)  
+                obj.update_ball_position(adjusted_time, duration)
                 
                 ball_x1, ball_y1, ball_x2, ball_y2 = obj.ball.get_bounding_box(self.radius)
                 ball_x1, ball_y1 = osu_pixels_to_normal_coords(ball_x1, ball_y1, self.resolution_width, self.resolution_height)
                 ball_x2, ball_y2 = osu_pixels_to_normal_coords(ball_x2, ball_y2, self.resolution_width, self.resolution_height)
                 ball_x1, ball_y1, ball_x2, ball_y2 = map(int, [ball_x1, ball_y1, ball_x2, ball_y2])
                 
-                cv2.rectangle(overlay, (ball_x1, ball_y1), (ball_x2, ball_y2), (255, 255, 255), 2)
+                cv2.rectangle(overlay, (ball_x1, ball_y1), (ball_x2, ball_y2), (255, 0, 255), 3)
                 cv2.putText(overlay, "Ball", (ball_x1, ball_y1-10), 
                           cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
                 
@@ -232,7 +231,7 @@ class Player:
                 ret, frame = self.cap.read()
                 if not ret:
                     break
-                current_time = self.start_time + int(current_frame * 1000 / self.fps)
+                current_time = self.start_time + int(self.cap.get(cv2.CAP_PROP_POS_FRAMES) * 1000 / self.fps)
                 visible_objects = self.get_current_objects(current_time)
                 for obj in visible_objects:
                     self.draw_bounding_box(frame, obj)

@@ -17,7 +17,7 @@ class SliderBall:
         
     def get_bounding_box(self, radius: float) -> Tuple[float, float, float, float]:
         """Get the bounding box of the slider ball (x1, y1, x2, y2)"""
-        ball_radius = radius * 0.8  
+        ball_radius = radius * 1.5   
         return (
             self.x - ball_radius,
             self.y - ball_radius,
@@ -94,7 +94,7 @@ class Slider(HitObject):
             path_points = calculate_linear_points(
                 start_point,
                 control_points[-1],
-                num_points
+                len(control_points)
             )
         elif self.curve_type == CurveType.PERFECT:
             if len(control_points) != 3:
@@ -106,20 +106,20 @@ class Slider(HitObject):
                 control_points[0],  
                 control_points[1],  
                 control_points[2],  
-                num_points
+                len(control_points)
             )
         elif self.curve_type == CurveType.BEZIER:
             path_points = calculate_bezier_points(
                 control_points,
-                num_points
+                len(control_points)
             )
         elif self.curve_type == CurveType.CATMULL:
             if len(control_points) < 4:
-                return calculate_bezier_points(control_points, num_points)
+                return calculate_bezier_points(control_points, len(control_points))
                 
             path_points = calculate_catmull_points(
                 control_points,
-                num_points
+                len(control_points)
             )
         else:
             raise ValueError(f"Unknown curve type: {self.curve_type}")
@@ -148,19 +148,13 @@ class Slider(HitObject):
             
     def update_ball_position(self, current_time: int, duration: float):
         """Update the slider ball position based on current time with improved accuracy
-        
-        Args:
-            current_time: The current time in ms
-            duration: The total duration of the slider in ms
         """
         if not self.ball:
             return
         
-        # Calculate overall progress through the slider
         time_progress = (current_time - self.time) / duration
         time_progress = max(0.0, min(1.0, time_progress))
         
-        # Calculate which slide we're on and progress within that slide
         total_slides = self.slides
         slide_number = int(time_progress * total_slides)
         slide_progress = (time_progress * total_slides) - slide_number
@@ -169,28 +163,22 @@ class Slider(HitObject):
             slide_number = total_slides - 1
             slide_progress = 1.0
         
-        # Get path points with higher resolution for better accuracy
-        path_points = self.calculate_path_points(1000)  # Increased from 300 for better accuracy
+        path_points = self.calculate_path_points(1000)  
         
-        # Calculate the actual position along the path
-        if slide_number % 2 == 1:  # Reverse direction for odd-numbered slides
+        if slide_number % 2 == 1:  
             slide_progress = 1.0 - slide_progress
         
-        # Calculate exact position using linear interpolation
         point_index = slide_progress * (len(path_points) - 1)
         index1 = int(point_index)
         index2 = min(index1 + 1, len(path_points) - 1)
         t = point_index - index1
         
-        # Get the two points to interpolate between
         p1 = path_points[index1]
         p2 = path_points[index2]
         
-        # Calculate exact position using linear interpolation
         x = p1[0] + t * (p2[0] - p1[0])
         y = p1[1] + t * (p2[1] - p1[1])
         
-        # Update ball position
         self.ball.update_position(x, y, current_time)
         
     @classmethod
