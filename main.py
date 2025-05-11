@@ -40,8 +40,8 @@ config = DanserConfig(
     mods="AT"
 )
 
-BEATMAP_NAME = "Rockefeller Street (Nightcore Mix)"
-DIFFICULTY = -1
+BEATMAP_NAME = "Time to say Goodbye"
+DIFFICULTY = "No Return"
 beatmap = beatmap_parser.extract_beatmap(BEATMAP_NAME, is_full_path=False)
 beatmap.parse_difficulties(None)
 difficulty = beatmap.get_difficulty(DIFFICULTY)

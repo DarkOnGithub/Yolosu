@@ -48,9 +48,9 @@ class Slider(HitObject):
         self.ball = SliderBall(x=self.x, y=self.y, time=self.time)
         
         if self.curve_type == CurveType.PERFECT:
-            if len(self.control_points) < 3:
+            if len(self.control_points) < 2:
                 self.curve_type = CurveType.LINEAR
-            elif len(self.control_points) > 3:
+            elif len(self.control_points) > 2:
                 self.curve_type = CurveType.BEZIER
 
     def _validate(self):
@@ -81,6 +81,7 @@ class Slider(HitObject):
         """Calculate the points along the slider path"""
         if self._path_points is not None and len(self._path_points) == num_points:
             return self._path_points
+
         start_point = (self.x, self.y)
         control_points = [(self.x, self.y)]
         for cp in self.control_points:
@@ -123,7 +124,6 @@ class Slider(HitObject):
         else:
             raise ValueError(f"Unknown curve type: {self.curve_type}")
         
-        
         if len(path_points) > 1:
             total_length = 0
             for i in range(1, len(path_points)):
@@ -147,7 +147,7 @@ class Slider(HitObject):
         return path_points
             
     def update_ball_position(self, current_time: int, duration: float):
-        """Update the slider ball position based on current time
+        """Update the slider ball position based on current time with improved accuracy
         
         Args:
             current_time: The current time in ms
@@ -156,33 +156,41 @@ class Slider(HitObject):
         if not self.ball:
             return
         
+        # Calculate overall progress through the slider
         time_progress = (current_time - self.time) / duration
-        time_progress = max(0.0, min(1.0, time_progress))  
+        time_progress = max(0.0, min(1.0, time_progress))
         
-        slide_number = int(time_progress * self.slides)
-        slide_progress = (time_progress * self.slides) - slide_number
+        # Calculate which slide we're on and progress within that slide
+        total_slides = self.slides
+        slide_number = int(time_progress * total_slides)
+        slide_progress = (time_progress * total_slides) - slide_number
         
-        if slide_number >= self.slides:
-            slide_number = self.slides - 1
+        if slide_number >= total_slides:
+            slide_number = total_slides - 1
             slide_progress = 1.0
         
-        path_points = self.calculate_path_points(300)  
+        # Get path points with higher resolution for better accuracy
+        path_points = self.calculate_path_points(1000)  # Increased from 300 for better accuracy
         
-        if slide_number % 2 == 1:  
-            slide_progress = 1.0 - slide_progress  
-            
+        # Calculate the actual position along the path
+        if slide_number % 2 == 1:  # Reverse direction for odd-numbered slides
+            slide_progress = 1.0 - slide_progress
         
+        # Calculate exact position using linear interpolation
         point_index = slide_progress * (len(path_points) - 1)
         index1 = int(point_index)
         index2 = min(index1 + 1, len(path_points) - 1)
         t = point_index - index1
         
+        # Get the two points to interpolate between
         p1 = path_points[index1]
         p2 = path_points[index2]
         
+        # Calculate exact position using linear interpolation
         x = p1[0] + t * (p2[0] - p1[0])
         y = p1[1] + t * (p2[1] - p1[1])
         
+        # Update ball position
         self.ball.update_position(x, y, current_time)
         
     @classmethod

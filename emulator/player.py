@@ -48,8 +48,12 @@ class Player:
         self.ms_per_frame = 1000 / self.fps
         self.resolution_width = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         self.resolution_height = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        self.start_time = self.hit_objects[0].time - 1000 - self.approach_time
-        
+        first_hit_time = self.hit_objects[0].time if self.hit_objects else 0
+        start_time = first_hit_time - self.approach_time
+        if start_time <= 0.01:
+            start_time = -self.approach_time
+        self.start_time = start_time - 1000
+                
     def _generate_video(self) -> str:
         """Generate video using danser"""
         os.makedirs(self.config.output_dir, exist_ok=True)
@@ -98,7 +102,9 @@ class Player:
         settings['Recording']['custom']["CustomOptions"] = "-an"  
         
         settings['Playfield']['SeizureWarning']['Enabled'] = False
-
+        settings['Playfield']['LeadInTime'] = 0
+        settings['Playfield']['LeadInHold'] = 0
+        settings['Playfield']['FadeOutTime'] = 0
         with open(danser_settings_path, 'w') as f:
             json.dump(settings, f, indent='\t')
 
@@ -153,18 +159,44 @@ class Player:
         x1, y1, x2, y2 = map(int, [x1, y1, x2, y2])
         
         overlay = frame.copy()
+        label = obj.__class__.__name__
         
         color = (0, 255, 0)
         if isinstance(obj, Slider):
             if obj.curve_type == CurveType.PERFECT:
+                label += " Perfect"
                 color = (0, 0, 255)
             elif obj.curve_type == CurveType.BEZIER:
+                label += " Bezier"
                 color = (255, 0, 0)
             elif obj.curve_type == CurveType.LINEAR:
+                label += " Linear"
                 color = (0, 255, 0)
             elif obj.curve_type == CurveType.CATMULL:
+                label += " Catmull"
                 color = (255, 255, 0)
+            
+            control_points = [(obj.x, obj.y)] + obj.control_points
+            for i, (cx, cy) in enumerate(control_points):
+                cx, cy = osu_pixels_to_normal_coords(cx, cy, self.resolution_width, self.resolution_height)
+                cx, cy = int(cx), int(cy)
+                cv2.circle(overlay, (cx, cy), 5, (255, 0, 255), -1)  # Purple for control points
+                cv2.putText(overlay, f"CP{i}", (cx+5, cy+5), 
+                          cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 255), 2)
+            
+            # Draw curve points
+            path_points = obj.calculate_path_points(100)  # Use fewer points for visualization
+            for i, (px, py) in enumerate(path_points):
+                px, py = osu_pixels_to_normal_coords(px, py, self.resolution_width, self.resolution_height)
+                px, py = int(px), int(py)
+                cv2.circle(overlay, (px, py), 2, (0, 255, 255), -1)  # Yellow for curve points
                 
+                # Draw lines between curve points
+                if i > 0:
+                    prev_px, prev_py = osu_pixels_to_normal_coords(path_points[i-1][0], path_points[i-1][1], 
+                                                                 self.resolution_width, self.resolution_height)
+                    prev_px, prev_py = int(prev_px), int(prev_py)
+                    cv2.line(overlay, (prev_px, prev_py), (px, py), (0, 255, 255), 1)
             
             current_time = self.start_time + int(self.cap.get(cv2.CAP_PROP_POS_FRAMES) * 1000 / self.fps)
             if current_time >= obj.time and obj.ball:
@@ -184,9 +216,9 @@ class Player:
                           cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
                 
         cv2.rectangle(overlay, (x1, y1), (x2, y2), color, 2)
-        label = obj.__class__.__name__
         cv2.putText(overlay, label, (x1, y1-10), 
                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+        
         cv2.addWeighted(overlay, alpha, frame, 1 - alpha, 0, frame)
     
     def play(self):
