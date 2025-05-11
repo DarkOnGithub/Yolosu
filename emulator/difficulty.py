@@ -15,7 +15,7 @@ class Difficulty:
     general: GeneralSection
     metadata: MetadataSection
     difficulty: DifficultySection
-    events: EventsSection
+    events: None
     timing_points: TimingPointsSection
     colours: ColoursSection
     hit_objects: HitObjectsSection
@@ -26,7 +26,7 @@ class Difficulty:
         self.general = GeneralSection()
         self.metadata = MetadataSection()
         self.difficulty = DifficultySection()
-        self.events = EventsSection()
+        self.events = None
         self.timing_points = TimingPointsSection()
         self.colours = ColoursSection()
         self.hit_objects = HitObjectsSection()

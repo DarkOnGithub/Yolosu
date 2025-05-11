@@ -42,7 +42,7 @@ class Beatmap:
         Parse the difficulties of the beatmap.
         Note: if not difficulty_names is provided, all difficulties will be parsed.
         """
-        difficulty_names = difficulty_names or [difficulty.name for difficulty in self.difficulties]
+        difficulty_names = difficulty_names or [difficulty.difficulty_name for difficulty in self.difficulties]
         for difficulty in self.difficulties:
             if difficulty.difficulty_name in difficulty_names:
                 difficulty.parse()

@@ -29,8 +29,6 @@ def _parse_section(section_name: str, content: str, difficulty) -> None:
         difficulty.metadata.parse(content)
     elif section_name == "Difficulty":
         difficulty.difficulty.parse(content)
-    elif section_name == "Events":
-        difficulty.events.parse(content)
     elif section_name == "TimingPoints":
         difficulty.timing_points.parse(content)
     elif section_name == "Colours":

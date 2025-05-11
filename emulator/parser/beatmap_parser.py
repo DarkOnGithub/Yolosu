@@ -40,7 +40,7 @@ def find_beatmap(search_term: str, is_full_path: bool = False, beatmaps_dir: str
 
     for item in os.listdir(beatmaps_dir):
         item_path = os.path.join(beatmaps_dir, item)
-        if not os.path.isdir(item_path):
+        if not (os.path.isdir(item_path) or item_path.lower().endswith(('.osz', '.zip'))):
             continue
         try:
             beatmap_id, title, _= _parse_beatmap_path(os.path.basename(item_path))

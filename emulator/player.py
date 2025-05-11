@@ -125,7 +125,7 @@ class Player:
         frame_end_time = current_time + self.ms_per_frame
         
         for obj in self.hit_objects:
-            visibility_start = obj.time - self.approach_time * 0.7
+            visibility_start = obj.time - self.approach_time
             hit_end_time = obj.time
             
             if isinstance(obj, Slider):
@@ -139,7 +139,8 @@ class Player:
             if (visibility_start <= frame_end_time and
                 hit_end_time >= current_time):
                 visible_objects.append(obj)
-            if (obj.time - self.approach_time) > (frame_end_time):
+                
+            if (obj.time - self.approach_time) > frame_end_time:
                 break
              
         return visible_objects
@@ -167,7 +168,6 @@ class Player:
             
             current_time = self.start_time + int(self.cap.get(cv2.CAP_PROP_POS_FRAMES) * 1000 / self.fps)
             if current_time >= obj.time and obj.ball:
-                
                 duration = obj.calculate_duration(
                     self.difficulty.difficulty.slider_multiplier,
                     self.difficulty.timing_points.points
@@ -194,19 +194,17 @@ class Player:
         current_frame = 0
         paused = False
         playback_speed = 1.0
-        
+
         while True:
             if not paused:
                 ret, frame = self.cap.read()
                 if not ret:
                     break
-                    
                 current_time = self.start_time + int(current_frame * 1000 / self.fps)
                 visible_objects = self.get_current_objects(current_time)
                 for obj in visible_objects:
                     self.draw_bounding_box(frame, obj)
-                    
-                
+
                 info_text = f"Speed: {playback_speed:.1f}x | Frame: {current_frame}"
                 cv2.putText(frame, info_text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
                 
