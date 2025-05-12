@@ -1,6 +1,7 @@
 from typing import List, Tuple, Optional
 from .base import HitObject, HitObjectType
 from .curve import CurveType, calculate_linear_points, calculate_perfect_circle_points, calculate_bezier_points, calculate_catmull_points
+from .approaching_circle import ApproachCircle
 
 class SliderBall:
     """Represents the slider ball that follows the slider path"""
@@ -17,7 +18,8 @@ class SliderBall:
         
     def get_bounding_box(self, radius: float) -> Tuple[float, float, float, float]:
         """Get the bounding box of the slider ball (x1, y1, x2, y2)"""
-        ball_radius = radius * 1.5   
+        ball_radius = radius * 1.6
+        
         return (
             self.x - ball_radius,
             self.y - ball_radius,
@@ -28,7 +30,7 @@ class SliderBall:
 class Slider(HitObject):
     """Represents a slider in osu!"""
     def __init__(self, x: int, y: int, time: int, type: HitObjectType, 
-                 hit_sound: int, curve_type: str = "L",
+                 hit_sound: int, approach_time: float, curve_type: str = "L",
                  control_points: List[Tuple[int, int]] = None,
                  slides: int = 1, length: float = 0.0,
                  edge_sounds: List[int] = None,
@@ -36,6 +38,7 @@ class Slider(HitObject):
                  extras: Optional[Tuple[int, int, int, int]] = None):
         super().__init__(x, y, time, type, hit_sound, extras)
         
+        self.approaching_circle = ApproachCircle(x, y, time, approach_time)
         self.curve_type = curve_type
         self.control_points = control_points or []
         self.slides = slides
@@ -45,6 +48,7 @@ class Slider(HitObject):
         self._path_points = None  
         self._validate()
         self.ball = SliderBall(x=self.x, y=self.y, time=self.time)
+        
         
         if self.curve_type == CurveType.PERFECT:
             if len(self.control_points) < 2:
@@ -187,7 +191,7 @@ class Slider(HitObject):
         x = int(parts[0])
         y = int(parts[1])
         time = int(parts[2])
-        type_value = int(parts[3])
+        
         hit_sound = int(parts[4])
         
         curve_info = parts[5].split('|')

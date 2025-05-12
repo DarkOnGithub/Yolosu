@@ -9,13 +9,14 @@ from tqdm import tqdm
 from .objects.base import HitObject
 from .objects.slider import Slider
 from .objects.spinner import Spinner
+from .objects.hitcircle import HitCircle
 from emulator.difficulty import Difficulty
 from utils.utils import osu_pixels_to_normal_coords
 from .objects.slider import CurveType
 from .config import DanserConfig
 from .beatmap import Beatmap
 from dataset.dataset_writer import DatasetWriter
-
+from .objects.approaching_circle import ApproachCircle
 
 class Player:
     def __init__(self, beatmap: Beatmap, difficulty: Difficulty, config: Optional[DanserConfig] = None):
@@ -63,7 +64,7 @@ class Player:
         os.makedirs(self.config.output_dir, exist_ok=True)
         
         beatmap_name = self.beatmap.title
-        output_name = f"{beatmap_name}_{self.difficulty.metadata.version}.mp4"
+        output_name = f"{beatmap_name}_{self.difficulty.difficulty_name}.mp4"
         output_path = os.path.join(self.config.output_dir, output_name)
         
         if os.path.exists(output_path):
@@ -103,12 +104,14 @@ class Player:
         settings['Recording']['FrameWidth'] = self.config.width
         settings['Recording']['FrameHeight'] = self.config.height
         settings['Recording']['FPS'] = self.config.fps
-        settings['Recording']['custom']["CustomOptions"] = "-an"  
+        settings['Recording']['custom']["CustomOptions"] = "-an -quiet -nostats"  
         
         settings['Playfield']['SeizureWarning']['Enabled'] = False
         settings['Playfield']['LeadInTime'] = 0
         settings['Playfield']['LeadInHold'] = 0
         settings['Playfield']['FadeOutTime'] = 0
+        
+        
         with open(danser_settings_path, 'w') as f:
             json.dump(settings, f, indent='\t')
 
@@ -145,8 +148,17 @@ class Player:
                 )
             elif isinstance(obj, Spinner):
                 hit_end_time = obj.end_time
+                
+            if isinstance(obj, (HitCircle, Slider)):
+                min_approach_time = obj.approaching_circle.appear + (self.approach_time * 0.3)
+                if (min_approach_time <= frame_end_time and 
+                    obj.approaching_circle.time >= current_time):
+                    approaching_circle = obj.approaching_circle
+                    visible_objects.append(approaching_circle)
             
-            if (visibility_start <= frame_end_time and
+            min_visibility_time = visibility_start + (self.approach_time * 0.3)
+            
+            if (min_visibility_time <= frame_end_time and
                 hit_end_time >= current_time):
                 visible_objects.append(obj)
                 
@@ -155,9 +167,12 @@ class Player:
              
         return visible_objects
     
-    def draw_bounding_box(self, frame: np.ndarray, obj: HitObject, alpha: float = 0.5):
+    def draw_bounding_box(self, frame: np.ndarray, obj: HitObject, alpha: float = 0.5, current_time: float = 0):
         """Draw a bounding box for a hit object on the frame"""
-        x1, y1, x2, y2 = obj.get_bounding_box(self.radius)
+        if isinstance(obj, ApproachCircle):
+            x1, y1, x2, y2 = obj.get_bounding_box(current_time, self.radius)
+        else:
+            x1, y1, x2, y2 = obj.get_bounding_box(self.radius)
         
         x1, y1 = osu_pixels_to_normal_coords(x1, y1, self.resolution_width, self.resolution_height)
         x2, y2 = osu_pixels_to_normal_coords(x2, y2, self.resolution_width, self.resolution_height)
@@ -189,7 +204,7 @@ class Player:
                 cv2.putText(overlay, f"CP{i}", (cx+5, cy+5), 
                           cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 255), 2)
             
-            path_points = obj.calculate_path_points(1000) 
+            path_points = obj.calculate_path_points(1000)
             for i, (px, py) in enumerate(path_points):
                 px, py = osu_pixels_to_normal_coords(px, py, self.resolution_width, self.resolution_height)
                 px, py = int(px), int(py)
@@ -210,6 +225,8 @@ class Player:
                 cv2.rectangle(overlay, (ball_x1, ball_y1), (ball_x2, ball_y2), (255, 0, 255), 3)
                 cv2.putText(overlay, "Ball", (ball_x1, ball_y1-10), 
                           cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
+        
+    
                 
         cv2.rectangle(overlay, (x1, y1), (x2, y2), color, 2)
         cv2.putText(overlay, label, (x1, y1-10), 
@@ -224,6 +241,11 @@ class Player:
 
     def visualize_frame(self, frame, current_time: int):
         """Visualize objects on the current frame."""
+        
+        if len(frame.shape) == 3:
+            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            
+            frame = cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR)
         visible_objects = self.get_current_objects(current_time)
         for obj in visible_objects:
             self.draw_bounding_box(frame, obj)
@@ -231,18 +253,18 @@ class Player:
 
     def handle_playback_controls(self, key: int, paused: bool, playback_speed: float, current_frame: int) -> Tuple[bool, float, int]:
         """Handle keyboard controls for playback."""
-        if key == ord('q'):  # Quit
+        if key == ord('q'):  
             return False, playback_speed, current_frame
-        elif key == ord(' '):  # Pause/Resume
+        elif key == ord(' '):  
             return not paused, playback_speed, current_frame
-        elif key == ord('+'):  # Increase speed
+        elif key == ord('+'):  
             return paused, min(playback_speed + 0.5, 4.0), current_frame
-        elif key == ord('-'):  # Decrease speed
+        elif key == ord('-'):  
             return paused, max(playback_speed - 0.5, 0.25), current_frame
-        elif key == ord('f'):  # Step forward
+        elif key == ord('f'):  
             if paused:
                 return paused, playback_speed, current_frame + 1
-        elif key == ord('b'):  # Step backward
+        elif key == ord('b'):  
             if paused and current_frame > 0:
                 return paused, playback_speed, current_frame - 1
         return paused, playback_speed, current_frame
@@ -254,11 +276,9 @@ class Player:
         paused = False
         playback_speed = 1.0
 
-        # Set optimal properties for fast processing
         if not visualize:
-            self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 3)  # Reduce buffer size for faster reading
+            self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 3)
 
-        # Create progress bar for non-visualization mode
         if not visualize:
             pbar = tqdm(total=self.frame_count, desc="Processing frames", unit="frames")
 
@@ -271,7 +291,7 @@ class Player:
                 current_time = self.start_time + int(self.cap.get(cv2.CAP_PROP_POS_FRAMES) * 1000 / self.fps)
                 visible_objects = self.get_current_objects(current_time)
                 
-                # Update ball positions for all visible sliders
+                
                 for obj in visible_objects:
                     if isinstance(obj, Slider) and obj.ball and current_time >= obj.time:
                         duration = obj.calculate_duration(
@@ -286,7 +306,7 @@ class Player:
                     self.draw_frame_info(frame, playback_speed, current_frame)
                     cv2.imshow('Osu! Gameplay', frame)
                 else:
-                    self.process_frame(frame, current_frame, visible_objects)
+                    self.process_frame(frame, current_time, visible_objects)
                     pbar.update(1)
                 
                 current_frame += 1
@@ -320,8 +340,8 @@ class Player:
             cv2.destroyAllWindows()
         self.dataset_writer.save()
 
-    def process_frame(self, frame: np.ndarray, current_frame: int, visible_objects: List[HitObject]):
-        self.dataset_writer.write_frame(frame, visible_objects)
+    def process_frame(self, frame: np.ndarray, current_time: float, visible_objects: List[HitObject]):
+        self.dataset_writer.write_frame(frame, visible_objects, current_time)
     
     def __del__(self):
         """Cleanup when object is destroyed"""

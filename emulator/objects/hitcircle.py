@@ -1,11 +1,13 @@
 from typing import Optional, Tuple
 from .base import HitObject, HitObjectType
+from .approaching_circle import ApproachCircle
 
 class HitCircle(HitObject):
     """Represents a hit circle in osu!"""
-    def __init__(self, x: int, y: int, time: int, type: HitObjectType, 
+    def __init__(self, x: int, y: int, time: int, type: HitObjectType, approach_time: float,
                  hit_sound: int, extras: Optional[Tuple[int, int, int, int]] = None):
         super().__init__(x, y, time, type, hit_sound, extras)
+        self.approaching_circle = ApproachCircle(x, y, time, approach_time)
         if self.type != HitObjectType.HIT_CIRCLE:
             raise ValueError(f"Invalid type for HitCircle: {self.type}")
     

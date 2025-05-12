@@ -11,17 +11,19 @@ import json
 from emulator.config import DanserConfig
 import os
 from utils.utils import osu_pixels_to_normal_coords
+import cv2
 
 OBJECT_CLASS_MAP = {
     "hitcircle": "circle",
     "slider": "slider",
     "spinner": "spinner",
     "ball": "ball",
+    "approachcircle": "approaching_circle",
 }
 
 class DatasetWriter:
     """
-    Records frames and hit object bounding boxes to a JSON dataset.
+    Records frames and hit object bounding boxes to separate index and data JSON files.
     """
     def __init__(self, beatmap: Beatmap, difficulty: Difficulty, dataset_path: str, config: DanserConfig):
         self.beatmap = beatmap
@@ -29,20 +31,23 @@ class DatasetWriter:
         self.config = config
         self.dataset_path = dataset_path
 
-        # Initialize content structure
-        self.content: Dict[str, Any] = {
+        self.index_content: Dict[str, Any] = {
             'resolution': (config.width, config.height),
             'beatmap_name': beatmap.title,
             'difficulty_name': difficulty.difficulty_name,
             'fps': config.fps,
             'total_frames': 0,
             'objects_count': {k: 0 for k in OBJECT_CLASS_MAP.values()},
-            'objects_count': {**{k: 0 for k in OBJECT_CLASS_MAP.values()}, 'empty': 0},
+            'frames': [],  
+        }
+        self.index_content['objects_count']['empty'] = 0
+
+        self.data_content: Dict[str, Any] = {
             'images': [],
             'objects': {k: [] for k in OBJECT_CLASS_MAP.values()},
         }
-        # Ensure 'empty' key
-        self.content['objects']['empty'] = []
+
+        self.data_content['objects']['empty'] = []
 
     def normalize_box(self, box: Tuple[float, float, float, float]) -> Tuple[float, float, float, float]:
         w, h = self.config.width, self.config.height
@@ -53,52 +58,71 @@ class DatasetWriter:
 
     def encode_image(self, frame: np.ndarray) -> str:
         """Convert NumPy frame to compressed JPEG base64 string."""
+        if len(frame.shape) == 3:
+            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         img = Image.fromarray(frame)
         buf = BytesIO()
         img.save(buf, format='JPEG', quality=85, optimize=True)
         return base64.b64encode(buf.getvalue()).decode('utf-8')
 
-    def write_frame(self, frame: np.ndarray, visible_objects: List[HitObject]):
+    def write_frame(self, frame: np.ndarray, visible_objects: List[HitObject], current_time: float):
         """
         Record a frame and all visible hit object bounding boxes.
         """
-        self.content['images'].append(self.encode_image(frame))
-        frame_boxes: Dict[str, List[Tuple[float,float,float,float]]] = {k: [] for k in self.content['objects']}
+        self.data_content['images'].append(self.encode_image(frame))
+        frame_boxes: Dict[str, List[Tuple[float,float,float,float]]] = {k: [] for k in self.data_content['objects']}
+
+        frame_objects: Dict[str, int] = {k: 0 for k in OBJECT_CLASS_MAP.values()}
+        frame_objects['empty'] = 0
 
         for obj in visible_objects:
             cls = obj.__class__.__name__.lower()
             if cls not in OBJECT_CLASS_MAP:
                 continue
             key = OBJECT_CLASS_MAP[cls]
-            box = obj.get_bounding_box(self.difficulty.difficulty.get_radius())
-
+            if key == 'approaching_circle':
+                box = obj.get_bounding_box(self.difficulty.difficulty.get_radius(), current_time)
+                if box == (0, 0, 0, 0):
+                    continue
+            else:
+                box = obj.get_bounding_box(self.difficulty.difficulty.get_radius())
             norm = self.normalize_box(box)
-
             frame_boxes[key].append(norm)
-            self.content['objects_count'][key] += 1
-            if key == 'slider' and hasattr(obj, 'ball'):
+            frame_objects[key] += 1
+            self.index_content['objects_count'][key] += 1
+            
+            
+            if key == 'slider':
                 ball_box = obj.ball.get_bounding_box(self.difficulty.difficulty.get_radius())
                 norm_ball = self.normalize_box(ball_box)
                 frame_boxes['ball'].append(norm_ball)
-                self.content['objects_count']['ball'] += 1
-
+                frame_objects['ball'] += 1
+                self.index_content['objects_count']['ball'] += 1
+                
         if not any(frame_boxes[k] for k in frame_boxes if k != 'empty'):
-            frame_boxes['empty'] = [()]  # placeholder
-            self.content['objects_count']['empty'] += 1
+            frame_boxes['empty'] = [()]  
+            frame_objects['empty'] = 1
+            self.index_content['objects_count']['empty'] += 1
         else:
             frame_boxes['empty'] = []
 
-        # Append per-frame lists
+        self.index_content['frames'].append({
+            'frame_index': len(self.data_content['images']) - 1,
+            'objects': frame_objects
+        })
         for k, boxes in frame_boxes.items():
-            self.content['objects'][k].append(boxes)
-
-        # Update total_frames
-        self.content['total_frames'] = len(self.content['images'])
+            self.data_content['objects'][k].append(boxes)
+        self.index_content['total_frames'] = len(self.data_content['images'])
 
     def save(self):
-        """Write JSON content to disk."""
+        """Write index and data JSON content to disk."""
         os.makedirs(self.dataset_path, exist_ok=True)
-        fn = f"{self.beatmap.title}_{self.difficulty.difficulty_name}_dataset.json"
-        path = os.path.join(self.dataset_path, fn)
-        with open(path, 'w') as f:
-            json.dump(self.content, f)
+        base_name = f"{self.beatmap.title}_{self.difficulty.difficulty_name}"
+        
+        index_path = os.path.join(self.dataset_path, f"{base_name}_index.json")
+        with open(index_path, 'w') as f:
+            json.dump(self.index_content, f)
+            
+        data_path = os.path.join(self.dataset_path, f"{base_name}_data.json")
+        with open(data_path, 'w') as f:
+            json.dump(self.data_content, f)

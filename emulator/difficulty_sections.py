@@ -211,7 +211,7 @@ class HitObjectsSection(Section):
     def __init__(self):
         self.objects = []
 
-    def parse(self, content: str) -> None:
+    def parse(self, content: str, approach_time: float) -> None:
         for line in content.split('\n'):
             if ',' in line:
                 parts = line.split(',')
@@ -224,7 +224,7 @@ class HitObjectsSection(Section):
                 params = [p.strip() for p in parts[5:]]
 
                 if type & base.HitObjectType.HIT_CIRCLE.value:  
-                    self.objects.append(HitCircle(x, y, time, base.HitObjectType.HIT_CIRCLE, hit_sound))
+                    self.objects.append(HitCircle(x, y, time, base.HitObjectType.HIT_CIRCLE,  approach_time, hit_sound))
                 elif type & base.HitObjectType.SLIDER.value:  
                     curve_data = params[0].split('|')
                     curve_type = curve_data[0]
@@ -234,7 +234,7 @@ class HitObjectsSection(Section):
                     edge_sounds = [int(s) for s in params[3].split('|')] if len(params) > 3 else []
                     edge_sets = [s.split(':') for s in params[4].split('|')] if len(params) > 4 else []
                     hit_sample = params[5].split(':') if len(params) > 5 else []
-                    self.objects.append(Slider(x, y, time, base.HitObjectType.SLIDER, hit_sound, 
+                    self.objects.append(Slider(x, y, time, base.HitObjectType.SLIDER, hit_sound, approach_time,
                                             curve_type, curve_points, slides, length, 
                                             edge_sounds, edge_sets, hit_sample))
                 elif type & base.HitObjectType.SPINNER.value: 

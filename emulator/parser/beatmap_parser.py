@@ -1,10 +1,9 @@
 from emulator.beatmap import Beatmap, _parse_beatmap_path
 import zipfile
-from typing import List, Optional, Union
+from typing import List, Optional
 import os
 import logging
 from emulator.difficulty import Difficulty
-import re
 
 def _extract_zip(zip_path: str, extract_to: str) -> None:
     """

@@ -20,7 +20,7 @@ class Spinner(HitObject):
     
     def get_bounding_box(self, radius: int) -> Tuple[float, float, float, float]:
         """Get the bounding box of the spinner (x1, y1, x2, y2)"""
-        
+        radius = 256 * 0.9
         center_x, center_y = 256, 192
         return (
             center_x - radius,  
@@ -39,7 +39,7 @@ class Spinner(HitObject):
         x = int(parts[0])
         y = int(parts[1])
         time = int(parts[2])
-        type_value = int(parts[3])
+        
         hit_sound = int(parts[4])
         end_time = int(parts[5])
         

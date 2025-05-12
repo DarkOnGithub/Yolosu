@@ -1,4 +1,4 @@
-from .difficulty_sections import GeneralSection, MetadataSection, DifficultySection, EventsSection, TimingPointsSection, ColoursSection, HitObjectsSection
+from .difficulty_sections import GeneralSection, MetadataSection, DifficultySection, TimingPointsSection, ColoursSection, HitObjectsSection
 from .parser.difficulty_parser import parse_difficulty
 import re
 import logging

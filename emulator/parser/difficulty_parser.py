@@ -34,4 +34,4 @@ def _parse_section(section_name: str, content: str, difficulty) -> None:
     elif section_name == "Colours":
         difficulty.colours.parse(content)
     elif section_name == "HitObjects":
-        difficulty.hit_objects.parse(content)
+        difficulty.hit_objects.parse(content, difficulty.difficulty.get_approach_time())

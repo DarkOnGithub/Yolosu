@@ -34,40 +34,75 @@ logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 logger.handlers = [handler]  
 config = DanserConfig(
-    width=960,
-    height=540,
+    width=416,
+    height=234,
     quickstart=True,
     mods="AT",
-    dataset_dir="dataset_yolo_test"
+    dataset_dir="dataset_yolo_test",
+    skin="Aristia(Edit)+trail"
 )
 
-# BEATMAP_NAME = "Time to say Goodbye"
-# DIFFICULTY = "No Return"
-# beatmap = beatmap_parser.extract_beatmap(BEATMAP_NAME, is_full_path=False)
-# beatmap.parse_difficulties(None)
-# difficulty = beatmap.get_difficulty(DIFFICULTY)
-# player = Player(
-#     beatmap=beatmap,
-#     difficulty=difficulty,
-#     config=config
-# )
 
-# player.play(visualize=False)
-# from dataset.dataset_loader import DatasetLoader
-# dataset_loader = DatasetLoader("dataset_yolo_test/Time to Say Goodbye (TV Size)_No Return_dataset.json")
-# info = dataset_loader.get_dataset_info()
-# print(info)
-# dataset_loader.play_video(fps=60)
-from dataset.dataset_balancer import DatasetBalancer
 
-balancer = DatasetBalancer(
-    source_datasets=['dataset_yolo_test'],
-    output_dir='balanced_dataset',
-    target_counts={
-        'circle': 100,
-        'slider': 50,
-        'spinner': 25
-    }
-)
 
-balancer.create_balanced_dataset()
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+if __name__ == "__main__":
+    from dataset.dataset import Dataset
+
+    dataset = Dataset.create_from_beatmaps(
+        beatmaps_folder="./beatmaps", 
+        output_folder="./dataset_yolo_test", 
+        config=config, 
+        num_beatmaps=6, 
+        difficulties_per_beatmap=2, 
+        visualize=False,
+        object_counts={
+            'circle': 1000,
+            'slider': 1000,
+            'spinner': 500,
+            'ball': 1000,
+            'approaching_circle': 1000
+        }
+    )
+    dataset.export_yolo(output_folder="./dataset_yolo_test_export", split_ratio=0.8)
+
+
+    Dataset.create_visualization_video(
+        yolo_dataset_path="./dataset_yolo_test_export",
+        output_path="./dataset_yolo_test_export/visualization.mp4",
+        fps=1
+    )

@@ -177,7 +177,7 @@ def calculate_catmull_points(control_points: List[Tuple[float, float]], num_poin
                 return 0
                 
             a = (t - t1) / t2_t1
-            b = (t - t2) / t3_t2
+            
             c = (t - t0) / t1_t0
             
             return np.array([
@@ -243,6 +243,6 @@ def find_circle_center_radius(a: Tuple[float, float], b: Tuple[float, float], c:
         radius = np.linalg.norm(center - points[0])
         
         return tuple(center), radius
-    except:
+    except Exception:
         return None, 0 
 
