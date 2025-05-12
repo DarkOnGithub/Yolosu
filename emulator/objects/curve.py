@@ -2,6 +2,7 @@ from typing import List, Tuple
 import numpy as np
 from scipy.interpolate import CubicSpline 
 from math import comb
+import threading
 
 class CurveType:
     LINEAR = "L"
@@ -9,7 +10,7 @@ class CurveType:
     BEZIER = "B"
     CATMULL = "C"
 
-PRECISION_BEZIER_QUANTIZATION = 0.001
+PRECISION_BEZIER_QUANTIZATION = 0.0001
 BEZIER_QUANTIZATIONSQ = PRECISION_BEZIER_QUANTIZATION * PRECISION_BEZIER_QUANTIZATION
 
 
@@ -50,137 +51,129 @@ def calculate_perfect_circle_points(a: Tuple[float, float], b: Tuple[float, floa
     
     return list(zip(x, y))
 
-
-
 def calculate_bezier_points(
-    control_points: List[Tuple[float, float]],
-    num_points: int
+    control_points: List[Tuple[float, float]]
 ) -> List[Tuple[float, float]]:
-    """
-    cps = np.array(control_points, dtype=float)
-    n = cps.shape[0] - 1
-    if n < 0 or num_points <= 0:
-        return []
-    if n == 0:
-        return [tuple(cps[0])] * num_points
-    if n == 1:
-        t = np.linspace(0, 1, num_points)
-        pts = np.outer(1 - t, cps[0]) + np.outer(t, cps[1])
-        return [tuple(pt) for pt in pts]
-
-    t = np.linspace(0, 1, num_points)[:, None]
-    binom = np.array([comb(n, ki) for ki in range(n + 1)], dtype=float)
-    k = np.arange(n + 1)
-    t_pow = t ** k
-    one_minus_t_pow = (1 - t) ** (n - k)
-    B = binom * t_pow * one_minus_t_pow
-    points = B @ cps  
-    return [tuple(pt) for pt in points]
-    """
-    if not control_points:
+    pts = control_points
+    n_total = len(pts)
+    if n_total == 0:
         return []
 
-    control_points_np = _to_np_arrays(control_points)
-    n_cps = len(control_points_np)
+    max_n = n_total
+    buf1 = np.zeros((max_n,   2), dtype=np.float64)  
+    buf2 = np.zeros((2*max_n-1, 2), dtype=np.float64)
 
-    if n_cps == 0:
-        return []
-    if n_cps == 1:
-        return [control_points[0]] * max(1, num_points) 
+    def is_flat_enough(cp: np.ndarray) -> bool:
+        diffs = cp[:-2] - 2.0*cp[1:-1] + cp[2:]
+        sqlens = np.einsum('ij,ij->i', diffs, diffs)
+        return np.all(sqlens <= BEZIER_QUANTIZATIONSQ)
 
-    output_path_points_adaptive: List[np.ndarray] = []
-    to_flatten_stack: List[List[np.ndarray]] = []
-    free_buffers_stack: List[List[np.ndarray]] = []
+    def subdivide(cp: np.ndarray, left: np.ndarray, right: np.ndarray):
+        n = cp.shape[0]
+        mid = buf1[:n]          # view of buf1
+        mid[:] = cp             # copy control points in
 
-    initial_curve_segment = [p.copy() for p in control_points_np]
-    to_flatten_stack.append(initial_curve_segment)
+        for i in range(n):
+            left[i]            = mid[0]
+            right[n - i - 1]   = mid[n - i - 1]
+            # collapse one level
+            mid[:n-i-1] = 0.5*(mid[:n-i-1] + mid[1:n-i])
 
-    flatness_threshold = BEZIER_QUANTIZATIONSQ
+    def approximate_bezier(cp_list: List[Tuple[float, float]]) -> List[Tuple[float, float]]:
+        cp = np.array(cp_list, dtype=np.float64)
+        n  = cp.shape[0]
 
-    while to_flatten_stack:
-        current_segment_cps = to_flatten_stack.pop()
-        if _is_flat_enough(current_segment_cps, flatness_threshold):
-            _approximate_flat_segment(current_segment_cps, output_path_points_adaptive)
-            free_buffers_stack.append(current_segment_cps)
-        else:
-            l_child_cps_buffer = [np.zeros(2, dtype=float) for _ in range(n_cps)]
-            if free_buffers_stack:
-                r_child_cps_buffer = free_buffers_stack.pop()
+        nonlocal buf1, buf2
+        if buf1.shape[0] < n:
+            buf1 = np.zeros((n, 2), dtype=np.float64)
+        if buf2.shape[0] < 2*n-1:
+            buf2 = np.zeros((2*n-1, 2), dtype=np.float64)
+
+        stack: List[np.ndarray] = [cp]
+        result: List[Tuple[float,float]] = []
+
+        while stack:
+            seg = stack.pop()
+            m   = seg.shape[0]
+            if m < 3 or is_flat_enough(seg):
+                l = buf2[:2*m-1].reshape((2*m-1,2))
+                r = buf1[:m].reshape((m,2))
+                subdivide(seg, l, r)
+
+                l[m:2*m-1] = r[1:m]
+
+                result.append((float(seg[0,0]), float(seg[0,1])))
+                for i in range(1, m-1):
+                    idx = 2 * i
+                    p   = (l[idx-1] + 2.0*l[idx] + l[idx+1]) * 0.25
+                    result.append((float(p[0]), float(p[1])))
             else:
-                r_child_cps_buffer = [np.zeros(2, dtype=float) for _ in range(n_cps)]
+                left  = np.empty((seg.shape[0],2), dtype=np.float64)
+                right = np.empty((seg.shape[0],2), dtype=np.float64)
+                subdivide(seg, left, right)
+                stack.append(right)
+                stack.append(left)
+
+        return result
+
+    out: List[Tuple[float,float]] = []
+    last_idx = 0
+    i = 0
+    while i < n_total:
+        multi = (i < n_total - 2) and (pts[i] == pts[i+1])
+        if multi or i == n_total - 1:
+            seg = pts[last_idx:i+1]
+            if len(seg) == 1:
+                inter = [seg[0]]
+            elif len(seg) == 2:
+                inter = [seg[0], seg[1]]
+            else:
+                inter = approximate_bezier(seg)
+
+            if not out or out[-1] != inter[0]:
+                out.extend(inter)
+            else:
+                out.extend(inter[1:])
+
+            i = i + 2 if multi else i + 1
+            last_idx = i
+        else:
+            i += 1
+
+    if out and out[-1] != pts[-1]:
+        out.append(pts[-1])
+    elif not out:
+        out.append(pts[-1])
+
+    # Ensure points are evenly distributed
+    if len(out) > 2:
+        total_length = 0
+        for i in range(len(out)-1):
+            dx = out[i+1][0] - out[i][0]
+            dy = out[i+1][1] - out[i][1]
+            total_length += (dx*dx + dy*dy)**0.5
+        
+        if total_length > 0:
+            target_points = min(len(out), 100)  # Limit maximum points
+            new_out = [out[0]]
+            current_length = 0
+            target_segment_length = total_length / (target_points - 1)
             
-            _subdivide(current_segment_cps, l_child_cps_buffer, r_child_cps_buffer)
-            for i in range(n_cps):
-                current_segment_cps[i] = l_child_cps_buffer[i]
+            for i in range(1, len(out)):
+                dx = out[i][0] - out[i-1][0]
+                dy = out[i][1] - out[i-1][1]
+                segment_length = (dx*dx + dy*dy)**0.5
+                current_length += segment_length
+                
+                if current_length >= target_segment_length:
+                    new_out.append(out[i])
+                    current_length = 0
             
-            to_flatten_stack.append(r_child_cps_buffer)
-            to_flatten_stack.append(current_segment_cps)
+            if new_out[-1] != out[-1]:
+                new_out.append(out[-1])
+            out = new_out
 
-    if n_cps > 0:
-        if not output_path_points_adaptive or not np.allclose(output_path_points_adaptive[-1], control_points_np[-1]):
-             output_path_points_adaptive.append(control_points_np[n_cps - 1].copy())
-
-
-    if num_points == 0:
-        return []
-    if not output_path_points_adaptive:
-        if n_cps == 1: 
-            return [control_points[0]] * max(1, num_points)
-        if n_cps > 1: 
-            return calculate_linear_points(control_points[0], control_points[-1], num_points)
-        return []
-
-    unique_adaptive_points: List[np.ndarray] = []
-    if output_path_points_adaptive:
-        unique_adaptive_points.append(output_path_points_adaptive[0])
-        for i in range(1, len(output_path_points_adaptive)):
-            if not np.allclose(output_path_points_adaptive[i], output_path_points_adaptive[i-1], atol=1e-9): # Stricter tolerance
-                unique_adaptive_points.append(output_path_points_adaptive[i])
-    
-    if not unique_adaptive_points: 
-        return [] 
-    if num_points == 1: 
-        return [_to_tuples([unique_adaptive_points[0]])[0]]
-    if len(unique_adaptive_points) == 1:
-        return [_to_tuples([unique_adaptive_points[0]])[0]] * num_points
-
-    path_data_np = np.array(unique_adaptive_points)
-    segment_lengths = np.sqrt(np.sum(np.diff(path_data_np, axis=0)**2, axis=1))
-    cumulative_distances = np.zeros(len(path_data_np))
-    cumulative_distances[1:] = np.cumsum(segment_lengths)
-
-    if cumulative_distances[-1] < 1e-9: 
-        return [_to_tuples([path_data_np[0]])[0]] * num_points
-
-    u_parameter_orig = cumulative_distances / cumulative_distances[-1]
-    u_parameter_new = np.linspace(0, 1, num_points)
-    
-    valid_indices = np.where(np.concatenate(([True], np.diff(u_parameter_orig) > 1e-9)))[0]
-    if len(valid_indices) < 2: 
-        if len(u_parameter_orig) >=2 and np.allclose(u_parameter_orig[0], u_parameter_orig[-1]): 
-            return [_to_tuples([path_data_np[0]])[0]] * num_points
-        return [_to_tuples([path_data_np[0]])[0]] * num_points
-
-
-    u_parameter_orig_mono = u_parameter_orig[valid_indices]
-    path_data_np_mono = path_data_np[valid_indices]
-
-    if len(path_data_np_mono) >= 4 and num_points > 2 : 
-        try:
-            cs_x = CubicSpline(u_parameter_orig_mono, path_data_np_mono[:, 0])
-            cs_y = CubicSpline(u_parameter_orig_mono, path_data_np_mono[:, 1])
-            x_coords_new = cs_x(u_parameter_new)
-            y_coords_new = cs_y(u_parameter_new)
-        except ValueError: 
-            x_coords_new = np.interp(u_parameter_new, u_parameter_orig_mono, path_data_np_mono[:, 0])
-            y_coords_new = np.interp(u_parameter_new, u_parameter_orig_mono, path_data_np_mono[:, 1])
-
-    else: 
-        x_coords_new = np.interp(u_parameter_new, u_parameter_orig_mono, path_data_np_mono[:, 0])
-        y_coords_new = np.interp(u_parameter_new, u_parameter_orig_mono, path_data_np_mono[:, 1])
-            
-    return list(zip(x_coords_new, y_coords_new))
-
+    return out
 
 def calculate_catmull_points(control_points: List[Tuple[float, float]], num_points: int) -> List[Tuple[float, float]]:
     if len(control_points) < 4:
@@ -278,213 +271,3 @@ def find_circle_center_radius(a: Tuple[float, float], b: Tuple[float, float], c:
     except:
         return None, 0 
 
-def _to_np_arrays(points_tuples: List[Tuple[float, float]]) -> List[np.ndarray]:
-    return [np.array(p, dtype=float) for p in points_tuples]
-
-def _to_tuples(points_np: List[np.ndarray]) -> List[Tuple[float, float]]:
-    return [tuple(p) for p in points_np]
-
-def _is_flat_enough(control_points_np: List[np.ndarray], flatness_sq_threshold: float) -> bool:
-    if len(control_points_np) < 3:
-        return True
-    for i in range(1, len(control_points_np) - 1):
-        d_vector = control_points_np[i-1] - 2 * control_points_np[i] + control_points_np[i+1]
-        if np.dot(d_vector, d_vector) > flatness_sq_threshold:
-            return False
-    return True
-
-def _subdivide(
-    control_points_np: List[np.ndarray],
-    l_child_cps_output: List[np.ndarray],
-    r_child_cps_output: List[np.ndarray]
-):
-    N = len(control_points_np)
-    midpoints_buffer = [p.copy() for p in control_points_np]
-    for i in range(N):
-        l_child_cps_output[i] = midpoints_buffer[0].copy()
-        r_child_cps_output[N - 1 - i] = midpoints_buffer[N - 1 - i].copy()
-        for j in range(N - 1 - i):
-            midpoints_buffer[j] = (midpoints_buffer[j] + midpoints_buffer[j+1]) * 0.5
-
-def _approximate_flat_segment(
-    segment_control_points_np: List[np.ndarray],
-    output_path_points: List[np.ndarray]
-):
-    N = len(segment_control_points_np)
-    if N == 0:
-        return
-    output_path_points.append(segment_control_points_np[0].copy())
-    if N < 2:
-        return
-    if N == 2: 
-        return
-
-    l_for_subdivision = [np.zeros(2, dtype=float) for _ in range(N)]
-    r_for_subdivision = [np.zeros(2, dtype=float) for _ in range(N)]
-    _subdivide(segment_control_points_np, l_for_subdivision, r_for_subdivision)
-
-    temp_combined_sequence = [np.zeros(2, dtype=float) for _ in range(2 * N - 1)]
-    for k_idx in range(N):
-        temp_combined_sequence[k_idx] = l_for_subdivision[k_idx]
-    for k_idx in range(N - 1):
-        temp_combined_sequence[N + k_idx] = r_for_subdivision[k_idx + 1]
-
-    for i in range(1, N - 1):
-        idx_in_combined = 2 * i
-        approximated_point = (temp_combined_sequence[idx_in_combined - 1] +
-                              2 * temp_combined_sequence[idx_in_combined] +
-                              temp_combined_sequence[idx_in_combined + 1]) * 0.25
-        output_path_points.append(approximated_point)
-
-def calculate_bezier_points(
-    control_points_tuples: List[Tuple[float, float]],
-    num_points: int
-) -> List[Tuple[float, float]]:
-    if not control_points_tuples:
-        return []
-
-    control_points_np = _to_np_arrays(control_points_tuples)
-    n_cps = len(control_points_np)
-
-    if n_cps == 0:
-        return []
-    if n_cps == 1:
-        return [control_points_tuples[0]] * max(1, num_points) 
-
-    output_path_points_adaptive: List[np.ndarray] = []
-    to_flatten_stack: List[List[np.ndarray]] = []
-    free_buffers_stack: List[List[np.ndarray]] = []
-
-    initial_curve_segment = [p.copy() for p in control_points_np]
-    to_flatten_stack.append(initial_curve_segment)
-
-    flatness_threshold = BEZIER_QUANTIZATIONSQ
-
-    while to_flatten_stack:
-        current_segment_cps = to_flatten_stack.pop()
-        if _is_flat_enough(current_segment_cps, flatness_threshold):
-            _approximate_flat_segment(current_segment_cps, output_path_points_adaptive)
-            free_buffers_stack.append(current_segment_cps)
-        else:
-            l_child_cps_buffer = [np.zeros(2, dtype=float) for _ in range(n_cps)]
-            if free_buffers_stack:
-                r_child_cps_buffer = free_buffers_stack.pop()
-            else:
-                r_child_cps_buffer = [np.zeros(2, dtype=float) for _ in range(n_cps)]
-            
-            _subdivide(current_segment_cps, l_child_cps_buffer, r_child_cps_buffer)
-            for i in range(n_cps):
-                current_segment_cps[i] = l_child_cps_buffer[i]
-            
-            to_flatten_stack.append(r_child_cps_buffer)
-            to_flatten_stack.append(current_segment_cps)
-
-    if n_cps > 0:
-        if not output_path_points_adaptive or not np.allclose(output_path_points_adaptive[-1], control_points_np[-1]):
-             output_path_points_adaptive.append(control_points_np[n_cps - 1].copy())
-
-
-    if num_points == 0:
-        return []
-    if not output_path_points_adaptive:
-        if n_cps == 1: 
-            return [control_points_tuples[0]] * max(1, num_points)
-        if n_cps > 1: 
-            return calculate_linear_points(control_points_tuples[0], control_points_tuples[-1], num_points)
-        return []
-
-    unique_adaptive_points: List[np.ndarray] = []
-    if output_path_points_adaptive:
-        unique_adaptive_points.append(output_path_points_adaptive[0])
-        for i in range(1, len(output_path_points_adaptive)):
-            if not np.allclose(output_path_points_adaptive[i], output_path_points_adaptive[i-1], atol=1e-9): # Stricter tolerance
-                unique_adaptive_points.append(output_path_points_adaptive[i])
-    
-    if not unique_adaptive_points: 
-        return [] 
-    if num_points == 1: 
-        return [_to_tuples([unique_adaptive_points[0]])[0]]
-    if len(unique_adaptive_points) == 1:
-        return [_to_tuples([unique_adaptive_points[0]])[0]] * num_points
-
-    path_data_np = np.array(unique_adaptive_points)
-    segment_lengths = np.sqrt(np.sum(np.diff(path_data_np, axis=0)**2, axis=1))
-    cumulative_distances = np.zeros(len(path_data_np))
-    cumulative_distances[1:] = np.cumsum(segment_lengths)
-
-    if cumulative_distances[-1] < 1e-9: 
-        return [_to_tuples([path_data_np[0]])[0]] * num_points
-
-    u_parameter_orig = cumulative_distances / cumulative_distances[-1]
-    u_parameter_new = np.linspace(0, 1, num_points)
-    
-    valid_indices = np.where(np.concatenate(([True], np.diff(u_parameter_orig) > 1e-9)))[0]
-    if len(valid_indices) < 2: 
-        if len(u_parameter_orig) >=2 and np.allclose(u_parameter_orig[0], u_parameter_orig[-1]): 
-            return [_to_tuples([path_data_np[0]])[0]] * num_points
-        return [_to_tuples([path_data_np[0]])[0]] * num_points
-
-
-    u_parameter_orig_mono = u_parameter_orig[valid_indices]
-    path_data_np_mono = path_data_np[valid_indices]
-
-    if len(path_data_np_mono) >= 4 and num_points > 2 : 
-        try:
-            cs_x = CubicSpline(u_parameter_orig_mono, path_data_np_mono[:, 0])
-            cs_y = CubicSpline(u_parameter_orig_mono, path_data_np_mono[:, 1])
-            x_coords_new = cs_x(u_parameter_new)
-            y_coords_new = cs_y(u_parameter_new)
-        except ValueError: 
-            x_coords_new = np.interp(u_parameter_new, u_parameter_orig_mono, path_data_np_mono[:, 0])
-            y_coords_new = np.interp(u_parameter_new, u_parameter_orig_mono, path_data_np_mono[:, 1])
-
-    else: 
-        x_coords_new = np.interp(u_parameter_new, u_parameter_orig_mono, path_data_np_mono[:, 0])
-        y_coords_new = np.interp(u_parameter_new, u_parameter_orig_mono, path_data_np_mono[:, 1])
-            
-    return list(zip(x_coords_new, y_coords_new))
-
-
-def calculate_piecewise_linear_interpolated_points(
-    control_points: List[Tuple[float, float]],
-    num_points: int
-) -> List[Tuple[float, float]]:
-    if not control_points:
-        return []
-    if num_points == 0:
-        return []
-    
-    if len(control_points) == 1:
-        return [control_points[0]] * max(1, num_points)
-
-    path_data_np = np.array(control_points, dtype=float)
-
-    if len(path_data_np) == 1: 
-        return [tuple(path_data_np[0])] * num_points
-
-    segment_lengths = np.sqrt(np.sum(np.diff(path_data_np, axis=0)**2, axis=1))
-    cumulative_distances = np.zeros(len(path_data_np))
-    cumulative_distances[1:] = np.cumsum(segment_lengths)
-
-    if cumulative_distances[-1] < 1e-9: 
-        return [tuple(path_data_np[0])] * num_points
-
-    u_parameter_orig = cumulative_distances / cumulative_distances[-1]
-    u_parameter_new = np.linspace(0, 1, num_points)
-    
-    valid_indices = np.where(np.concatenate(([True], np.diff(u_parameter_orig) > 1e-9)))[0]
-    if len(valid_indices) < 1: 
-        return []
-    if len(valid_indices) == 1: 
-        return [tuple(path_data_np[valid_indices[0]])] * num_points
-
-    u_parameter_orig_mono = u_parameter_orig[valid_indices]
-    path_data_np_mono = path_data_np[valid_indices]
-    
-    if len(path_data_np_mono) == 1: 
-        return [tuple(path_data_np_mono[0])] * num_points
-
-    x_coords_new = np.interp(u_parameter_new, u_parameter_orig_mono, path_data_np_mono[:, 0])
-    y_coords_new = np.interp(u_parameter_new, u_parameter_orig_mono, path_data_np_mono[:, 1])
-            
-    return list(zip(x_coords_new, y_coords_new))

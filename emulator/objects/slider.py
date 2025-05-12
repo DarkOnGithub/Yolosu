@@ -110,12 +110,11 @@ class Slider(HitObject):
             )
         elif self.curve_type == CurveType.BEZIER:
             path_points = calculate_bezier_points(
-                control_points,
-                len(control_points)
+                control_points
             )
         elif self.curve_type == CurveType.CATMULL:
             if len(control_points) < 4:
-                return calculate_bezier_points(control_points, len(control_points))
+                return calculate_bezier_points(control_points)
                 
             path_points = calculate_catmull_points(
                 control_points,
@@ -147,8 +146,7 @@ class Slider(HitObject):
         return path_points
             
     def update_ball_position(self, current_time: int, duration: float):
-        """Update the slider ball position based on current time with improved accuracy
-        """
+        """Update the slider ball position based on current time"""
         if not self.ball:
             return
         
