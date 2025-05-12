@@ -110,8 +110,7 @@ class Slider(HitObject):
             )
         elif self.curve_type == CurveType.BEZIER:
             path_points = calculate_bezier_points(
-                control_points
-            )
+                control_points            )
         elif self.curve_type == CurveType.CATMULL:
             if len(control_points) < 4:
                 return calculate_bezier_points(control_points)

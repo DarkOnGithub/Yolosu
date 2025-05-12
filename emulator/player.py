@@ -1,6 +1,6 @@
 import cv2
 import numpy as np
-from typing import List, Optional
+from typing import List, Optional, Tuple
 import os
 import subprocess
 import logging
@@ -13,6 +13,8 @@ from utils.utils import osu_pixels_to_normal_coords
 from .objects.slider import CurveType
 from .config import DanserConfig
 from .beatmap import Beatmap
+from dataset.dataset_writer import DatasetWriter
+
 
 class Player:
     def __init__(self, beatmap: Beatmap, difficulty: Difficulty, config: Optional[DanserConfig] = None):
@@ -53,7 +55,8 @@ class Player:
         if start_time <= 0.01:
             start_time = -self.approach_time
         self.start_time = start_time - 1000
-                
+        self.dataset_writer = DatasetWriter(self.beatmap, self.difficulty, self.config.dataset_dir)
+        
     def _generate_video(self) -> str:
         """Generate video using danser"""
         os.makedirs(self.config.output_dir, exist_ok=True)
@@ -220,63 +223,95 @@ class Player:
         
         cv2.addWeighted(overlay, alpha, frame, 1 - alpha, 0, frame)
     
-    def play(self):
-        """Play the video with bounding boxes and player controls"""
+    def draw_frame_info(self, frame, playback_speed: float, current_frame: int):
+        """Draw playback information on the frame."""
+        info_text = f"Speed: {playback_speed:.1f}x | Frame: {current_frame}"
+        cv2.putText(frame, info_text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+
+    def visualize_frame(self, frame, current_time: int):
+        """Visualize objects on the current frame."""
+        visible_objects = self.get_current_objects(current_time)
+        for obj in visible_objects:
+            self.draw_bounding_box(frame, obj)
+        cv2.imshow('Osu! Gameplay', frame)
+
+    def handle_playback_controls(self, key: int, paused: bool, playback_speed: float, current_frame: int) -> Tuple[bool, float, int]:
+        """Handle keyboard controls for playback."""
+        if key == ord('q'):  # Quit
+            return False, playback_speed, current_frame
+        elif key == ord(' '):  # Pause/Resume
+            return not paused, playback_speed, current_frame
+        elif key == ord('+'):  # Increase speed
+            return paused, min(playback_speed + 0.5, 4.0), current_frame
+        elif key == ord('-'):  # Decrease speed
+            return paused, max(playback_speed - 0.5, 0.25), current_frame
+        elif key == ord('f'):  # Step forward
+            if paused:
+                return paused, playback_speed, current_frame + 1
+        elif key == ord('b'):  # Step backward
+            if paused and current_frame > 0:
+                return paused, playback_speed, current_frame - 1
+        return paused, playback_speed, current_frame
+
+    def play(self, visualize: bool = False):
+        """Play the video with bounding boxes and player controls.
+        When visualize=False, it runs in dataset creation mode without any window rendering."""
         current_frame = 0
         paused = False
         playback_speed = 1.0
+
+        # Set optimal properties for fast processing
+        if not visualize:
+            self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 3)  # Reduce buffer size for faster reading
 
         while True:
             if not paused:
                 ret, frame = self.cap.read()
                 if not ret:
                     break
-                current_time = self.start_time + int(self.cap.get(cv2.CAP_PROP_POS_FRAMES) * 1000 / self.fps)
-                visible_objects = self.get_current_objects(current_time)
-                for obj in visible_objects:
-                    self.draw_bounding_box(frame, obj)
-
-                info_text = f"Speed: {playback_speed:.1f}x | Frame: {current_frame}"
-                cv2.putText(frame, info_text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
                 
-                cv2.imshow('Osu! Gameplay', frame)
+                if visualize:
+                    current_time = self.start_time + int(self.cap.get(cv2.CAP_PROP_POS_FRAMES) * 1000 / self.fps)
+                    self.visualize_frame(frame, current_time)
+                    self.draw_frame_info(frame, playback_speed, current_frame)
+                    cv2.imshow('Osu! Gameplay', frame)
+                else:
+                    current_time = self.start_time + int(self.cap.get(cv2.CAP_PROP_POS_FRAMES) * 1000 / self.fps)
+                    visible_objects = self.get_current_objects(current_time)
+                    self.process_frame(frame, current_time, visible_objects)
+                
                 current_frame += 1
             
-            key = cv2.waitKey(int(1000 / (self.fps * playback_speed))) & 0xFF
-            
-            if key == ord('q'):  
-                break
-            elif key == ord(' '):  
-                paused = not paused
-            elif key == ord('+'):  
-                playback_speed = min(playback_speed + 0.5, 4.0)
-            elif key == ord('-'):  
-                playback_speed = max(playback_speed - 0.5, 0.25)
-            elif key == ord('f'):  
-                if paused:
-                    ret, frame = self.cap.read()
-                    if ret:
-                        current_time = self.start_time + int(current_frame * 1000 / self.fps)
-                        visible_objects = self.get_current_objects(current_time)
-                        for obj in visible_objects:
-                            self.draw_bounding_box(frame, obj)
-                        cv2.imshow('Osu! Gameplay', frame)
-                        current_frame += 1
-            elif key == ord('b'):  
-                if paused and current_frame > 0:
-                    current_frame -= 1
+            if visualize:
+                # Only handle keyboard controls in visualization mode
+                wait_time = int(1000 / (self.fps * playback_speed))
+                key = cv2.waitKey(wait_time) & 0xFF
+                
+                paused, playback_speed, current_frame = self.handle_playback_controls(key, paused, playback_speed, current_frame)
+                
+                if key == ord('q'):
+                    break
+                
+                # Handle frame stepping
+                if paused and (key == ord('f') or key == ord('b')):
                     self.cap.set(cv2.CAP_PROP_POS_FRAMES, current_frame)
                     ret, frame = self.cap.read()
                     if ret:
                         current_time = self.start_time + int(current_frame * 1000 / self.fps)
-                        visible_objects = self.get_current_objects(current_time)
-                        for obj in visible_objects:
-                            self.draw_bounding_box(frame, obj)
+                        self.visualize_frame(frame, current_time)
+                        self.draw_frame_info(frame, playback_speed, current_frame)
                         cv2.imshow('Osu! Gameplay', frame)
-                        
-        self.cap.release()
-        cv2.destroyAllWindows()
+            else:
+                if current_frame >= self.frame_count:
+                    break
         
+        self.cap.release()
+        if visualize:
+            cv2.destroyAllWindows()
+            
+    def process_frame(self, frame: np.ndarray, current_time: int, visible_objects: List[HitObject]):
+        self.dataset_writer.write_frame(frame, current_time, visible_objects)
+    
     def __del__(self):
         """Cleanup when object is destroyed"""
         if hasattr(self, 'cap'):

@@ -20,7 +20,7 @@ class DanserConfig:
     record: bool = True
     output_name: Optional[str] = None
     output_dir: str = "videos"
-    
+        
     cursors: int = 1
     tag: int = 1
     
@@ -31,6 +31,8 @@ class DanserConfig:
     approach_rate: Optional[float] = None
     overall_difficulty: Optional[float] = None
     hp_drain: Optional[float] = None
+    
+    dataset_dir: str = "dataset"
     
     def to_danser_args(self, beatmap: Beatmap, difficulty: Difficulty) -> str:
         """Convert config to danser command line arguments"""
@@ -57,6 +59,8 @@ class DanserConfig:
             args.append('-record')
         if self.output_name:
             args.append(f'-out="..\\..\\{self.output_dir}\\{self.output_name.replace(".mp4", "")}"')
+        if self.dataset_dir:
+            args.append(f'-dataset="..\\..\\{self.dataset_dir}"')
         if self.cursors > 1:
             args.append(f'-cursors={self.cursors}')
         if self.tag > 1:

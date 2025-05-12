@@ -1,8 +1,6 @@
 from typing import List, Tuple
 import numpy as np
-from scipy.interpolate import CubicSpline 
-from math import comb
-import threading
+
 
 class CurveType:
     LINEAR = "L"
@@ -10,8 +8,6 @@ class CurveType:
     BEZIER = "B"
     CATMULL = "C"
 
-PRECISION_BEZIER_QUANTIZATION = 0.0001
-BEZIER_QUANTIZATIONSQ = PRECISION_BEZIER_QUANTIZATION * PRECISION_BEZIER_QUANTIZATION
 
 
 def calculate_linear_points(start: Tuple[float, float], end: Tuple[float, float], num_points: int) -> List[Tuple[float, float]]:
@@ -51,129 +47,110 @@ def calculate_perfect_circle_points(a: Tuple[float, float], b: Tuple[float, floa
     
     return list(zip(x, y))
 
-def calculate_bezier_points(
-    control_points: List[Tuple[float, float]]
-) -> List[Tuple[float, float]]:
-    pts = control_points
-    n_total = len(pts)
-    if n_total == 0:
-        return []
+BEZIER_QUANTIZATION = 0.5
+BEZIER_QUANTIZATIONSQ = BEZIER_QUANTIZATION * BEZIER_QUANTIZATION
 
-    max_n = n_total
-    buf1 = np.zeros((max_n,   2), dtype=np.float64)  
-    buf2 = np.zeros((2*max_n-1, 2), dtype=np.float64)
-
-    def is_flat_enough(cp: np.ndarray) -> bool:
-        diffs = cp[:-2] - 2.0*cp[1:-1] + cp[2:]
-        sqlens = np.einsum('ij,ij->i', diffs, diffs)
-        return np.all(sqlens <= BEZIER_QUANTIZATIONSQ)
-
-    def subdivide(cp: np.ndarray, left: np.ndarray, right: np.ndarray):
-        n = cp.shape[0]
-        mid = buf1[:n]          # view of buf1
-        mid[:] = cp             # copy control points in
-
-        for i in range(n):
-            left[i]            = mid[0]
-            right[n - i - 1]   = mid[n - i - 1]
-            # collapse one level
-            mid[:n-i-1] = 0.5*(mid[:n-i-1] + mid[1:n-i])
-
-    def approximate_bezier(cp_list: List[Tuple[float, float]]) -> List[Tuple[float, float]]:
-        cp = np.array(cp_list, dtype=np.float64)
-        n  = cp.shape[0]
-
-        nonlocal buf1, buf2
-        if buf1.shape[0] < n:
-            buf1 = np.zeros((n, 2), dtype=np.float64)
-        if buf2.shape[0] < 2*n-1:
-            buf2 = np.zeros((2*n-1, 2), dtype=np.float64)
-
-        stack: List[np.ndarray] = [cp]
-        result: List[Tuple[float,float]] = []
-
-        while stack:
-            seg = stack.pop()
-            m   = seg.shape[0]
-            if m < 3 or is_flat_enough(seg):
-                l = buf2[:2*m-1].reshape((2*m-1,2))
-                r = buf1[:m].reshape((m,2))
-                subdivide(seg, l, r)
-
-                l[m:2*m-1] = r[1:m]
-
-                result.append((float(seg[0,0]), float(seg[0,1])))
-                for i in range(1, m-1):
-                    idx = 2 * i
-                    p   = (l[idx-1] + 2.0*l[idx] + l[idx+1]) * 0.25
-                    result.append((float(p[0]), float(p[1])))
-            else:
-                left  = np.empty((seg.shape[0],2), dtype=np.float64)
-                right = np.empty((seg.shape[0],2), dtype=np.float64)
-                subdivide(seg, left, right)
-                stack.append(right)
-                stack.append(left)
-
-        return result
-
-    out: List[Tuple[float,float]] = []
-    last_idx = 0
-    i = 0
-    while i < n_total:
-        multi = (i < n_total - 2) and (pts[i] == pts[i+1])
-        if multi or i == n_total - 1:
-            seg = pts[last_idx:i+1]
-            if len(seg) == 1:
-                inter = [seg[0]]
-            elif len(seg) == 2:
-                inter = [seg[0], seg[1]]
-            else:
-                inter = approximate_bezier(seg)
-
-            if not out or out[-1] != inter[0]:
-                out.extend(inter)
-            else:
-                out.extend(inter[1:])
-
-            i = i + 2 if multi else i + 1
-            last_idx = i
-        else:
-            i += 1
-
-    if out and out[-1] != pts[-1]:
-        out.append(pts[-1])
-    elif not out:
-        out.append(pts[-1])
-
-    # Ensure points are evenly distributed
-    if len(out) > 2:
-        total_length = 0
-        for i in range(len(out)-1):
-            dx = out[i+1][0] - out[i][0]
-            dy = out[i+1][1] - out[i][1]
-            total_length += (dx*dx + dy*dy)**0.5
+def is_flat_enough(control_points: List[Tuple[float, float]]) -> bool:
+    for i in range(1, len(control_points) - 1):
+        p0 = np.array(control_points[i-1])
+        p1 = np.array(control_points[i])
+        p2 = np.array(control_points[i+1])
         
-        if total_length > 0:
-            target_points = min(len(out), 100)  # Limit maximum points
-            new_out = [out[0]]
-            current_length = 0
-            target_segment_length = total_length / (target_points - 1)
-            
-            for i in range(1, len(out)):
-                dx = out[i][0] - out[i-1][0]
-                dy = out[i][1] - out[i-1][1]
-                segment_length = (dx*dx + dy*dy)**0.5
-                current_length += segment_length
-                
-                if current_length >= target_segment_length:
-                    new_out.append(out[i])
-                    current_length = 0
-            
-            if new_out[-1] != out[-1]:
-                new_out.append(out[-1])
-            out = new_out
+        derivative = p0 - 2 * p1 + p2
+        if np.sum(derivative * derivative) > BEZIER_QUANTIZATIONSQ:
+            return False
+    return True
 
-    return out
+def subdivide_bezier(control_points: List[Tuple[float, float]]) -> Tuple[List[Tuple[float, float]], List[Tuple[float, float]]]:
+    n = len(control_points)
+    left = [None] * n
+    right = [None] * n
+    
+    midpoints = [np.array(p) for p in control_points]
+    
+    for i in range(n):
+        left[i] = tuple(midpoints[0])
+        right[n-i-1] = tuple(midpoints[n-i-1])
+        
+        for j in range(n-i-1):
+            midpoints[j] = (midpoints[j] + midpoints[j+1]) * 0.5
+    
+    return left, right
+
+def approximate_bezier_segment(control_points: List[Tuple[float, float]], output: List[Tuple[float, float]]):
+    """Approximate a Bezier curve segment using De Casteljau's algorithm."""
+    n = len(control_points)
+    if n == 0:
+        return
+    
+    left, right = subdivide_bezier(control_points)
+    
+    output.append(control_points[0])
+    
+    for i in range(1, n-1):
+        idx = 2 * i
+        p = (np.array(left[idx-1]) + 2 * np.array(left[idx]) + np.array(left[idx+1])) * 0.25
+        output.append(tuple(p))
+
+def _calculate_bezier_points(control_points: List[Tuple[float, float]]) -> List[Tuple[float, float]]:
+    if not control_points:
+        return []
+    
+    output = []
+    to_flatten = [control_points.copy()]
+    free_buffers = []
+    
+    while to_flatten:
+        parent = to_flatten.pop()
+        
+        if is_flat_enough(parent):
+            approximate_bezier_segment(parent, output)
+            free_buffers.append(parent)
+            continue
+        
+        left_child, right_child = subdivide_bezier(parent)
+        
+        for i in range(len(parent)):
+            parent[i] = left_child[i]
+        
+        to_flatten.append(right_child)
+        to_flatten.append(parent)
+    
+    output.append(control_points[-1])
+    return output
+
+def calculate_bezier_points(points: List[Tuple[float, float]]) -> List[Tuple[float, float]]:
+    if not points:
+        return []
+    
+    if len(points) <= 2:
+        return points
+    
+    out_points = []
+    last_index = 0
+    
+    for i in range(len(points)):
+        multi = i < len(points)-2 and points[i] == points[i+1]
+        
+        if multi or i == len(points)-1:
+            sub_points = points[last_index:i+1]
+            
+            if len(sub_points) == 2:
+                inter = [sub_points[0], sub_points[1]]
+            else:
+                inter = _calculate_bezier_points(sub_points)
+            
+            if not out_points or out_points[-1] != inter[0]:
+                out_points.extend(inter)
+            else:
+                out_points.extend(inter[1:])
+            
+            if multi:
+                i += 1
+            
+            last_index = i
+    
+    return out_points
 
 def calculate_catmull_points(control_points: List[Tuple[float, float]], num_points: int) -> List[Tuple[float, float]]:
     if len(control_points) < 4:
