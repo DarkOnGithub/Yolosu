@@ -37,18 +37,37 @@ config = DanserConfig(
     width=960,
     height=540,
     quickstart=True,
-    mods="AT"
+    mods="AT",
+    dataset_dir="dataset_yolo_test"
 )
 
-BEATMAP_NAME = "Time to say Goodbye"
-DIFFICULTY = "No Return"
-beatmap = beatmap_parser.extract_beatmap(BEATMAP_NAME, is_full_path=False)
-beatmap.parse_difficulties(None)
-difficulty = beatmap.get_difficulty(DIFFICULTY)
-player = Player(
-    beatmap=beatmap,
-    difficulty=difficulty,
-    config=config
+# BEATMAP_NAME = "Time to say Goodbye"
+# DIFFICULTY = "No Return"
+# beatmap = beatmap_parser.extract_beatmap(BEATMAP_NAME, is_full_path=False)
+# beatmap.parse_difficulties(None)
+# difficulty = beatmap.get_difficulty(DIFFICULTY)
+# player = Player(
+#     beatmap=beatmap,
+#     difficulty=difficulty,
+#     config=config
+# )
+
+# player.play(visualize=False)
+# from dataset.dataset_loader import DatasetLoader
+# dataset_loader = DatasetLoader("dataset_yolo_test/Time to Say Goodbye (TV Size)_No Return_dataset.json")
+# info = dataset_loader.get_dataset_info()
+# print(info)
+# dataset_loader.play_video(fps=60)
+from dataset.dataset_balancer import DatasetBalancer
+
+balancer = DatasetBalancer(
+    source_datasets=['dataset_yolo_test'],
+    output_dir='balanced_dataset',
+    target_counts={
+        'circle': 100,
+        'slider': 50,
+        'spinner': 25
+    }
 )
 
-player.play()
+balancer.create_balanced_dataset()

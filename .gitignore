@@ -7,3 +7,9 @@ __pycache__/
 *.pyw
 danser/
 settings/
+*.png
+*.jpg
+balanced_dataset/
+*.json
+*.txt
+dataset_yolo_*/

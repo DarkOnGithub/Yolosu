@@ -78,7 +78,6 @@ def subdivide_bezier(control_points: List[Tuple[float, float]]) -> Tuple[List[Tu
     return left, right
 
 def approximate_bezier_segment(control_points: List[Tuple[float, float]], output: List[Tuple[float, float]]):
-    """Approximate a Bezier curve segment using De Casteljau's algorithm."""
     n = len(control_points)
     if n == 0:
         return
@@ -88,8 +87,7 @@ def approximate_bezier_segment(control_points: List[Tuple[float, float]], output
     output.append(control_points[0])
     
     for i in range(1, n-1):
-        idx = 2 * i
-        p = (np.array(left[idx-1]) + 2 * np.array(left[idx]) + np.array(left[idx+1])) * 0.25
+        p = (np.array(left[i-1]) + 2 * np.array(left[i]) + np.array(left[i+1])) * 0.25
         output.append(tuple(p))
 
 def _calculate_bezier_points(control_points: List[Tuple[float, float]]) -> List[Tuple[float, float]]:

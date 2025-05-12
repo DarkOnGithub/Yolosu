@@ -5,6 +5,7 @@ import os
 import subprocess
 import logging
 import json
+from tqdm import tqdm
 from .objects.base import HitObject
 from .objects.slider import Slider
 from .objects.spinner import Spinner
@@ -55,7 +56,7 @@ class Player:
         if start_time <= 0.01:
             start_time = -self.approach_time
         self.start_time = start_time - 1000
-        self.dataset_writer = DatasetWriter(self.beatmap, self.difficulty, self.config.dataset_dir)
+        self.dataset_writer = DatasetWriter(self.beatmap, self.difficulty, self.config.dataset_dir, self.config)
         
     def _generate_video(self) -> str:
         """Generate video using danser"""
@@ -157,10 +158,11 @@ class Player:
     def draw_bounding_box(self, frame: np.ndarray, obj: HitObject, alpha: float = 0.5):
         """Draw a bounding box for a hit object on the frame"""
         x1, y1, x2, y2 = obj.get_bounding_box(self.radius)
+        
         x1, y1 = osu_pixels_to_normal_coords(x1, y1, self.resolution_width, self.resolution_height)
         x2, y2 = osu_pixels_to_normal_coords(x2, y2, self.resolution_width, self.resolution_height)
         x1, y1, x2, y2 = map(int, [x1, y1, x2, y2])
-        
+
         overlay = frame.copy()
         label = obj.__class__.__name__
         
@@ -199,15 +201,7 @@ class Player:
                     prev_px, prev_py = int(prev_px), int(prev_py)
                     cv2.line(overlay, (prev_px, prev_py), (px, py), (0, 255, 255), 1)
             
-            current_time = self.start_time + int(self.cap.get(cv2.CAP_PROP_POS_FRAMES) * 1000 / self.fps)
-            if current_time >= obj.time and obj.ball:
-                duration = obj.calculate_duration(
-                    self.difficulty.difficulty.slider_multiplier,
-                    self.difficulty.timing_points.points
-                )
-                adjusted_time = current_time - int(16.67)  
-                obj.update_ball_position(adjusted_time, duration)
-                
+            if obj.ball:
                 ball_x1, ball_y1, ball_x2, ball_y2 = obj.ball.get_bounding_box(self.radius)
                 ball_x1, ball_y1 = osu_pixels_to_normal_coords(ball_x1, ball_y1, self.resolution_width, self.resolution_height)
                 ball_x2, ball_y2 = osu_pixels_to_normal_coords(ball_x2, ball_y2, self.resolution_width, self.resolution_height)
@@ -264,26 +258,40 @@ class Player:
         if not visualize:
             self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 3)  # Reduce buffer size for faster reading
 
+        # Create progress bar for non-visualization mode
+        if not visualize:
+            pbar = tqdm(total=self.frame_count, desc="Processing frames", unit="frames")
+
         while True:
             if not paused:
                 ret, frame = self.cap.read()
                 if not ret:
                     break
                 
+                current_time = self.start_time + int(self.cap.get(cv2.CAP_PROP_POS_FRAMES) * 1000 / self.fps)
+                visible_objects = self.get_current_objects(current_time)
+                
+                # Update ball positions for all visible sliders
+                for obj in visible_objects:
+                    if isinstance(obj, Slider) and obj.ball and current_time >= obj.time:
+                        duration = obj.calculate_duration(
+                            self.difficulty.difficulty.slider_multiplier,
+                            self.difficulty.timing_points.points
+                        )
+                        adjusted_time = current_time - int(16.67)
+                        obj.update_ball_position(adjusted_time, duration)
+                
                 if visualize:
-                    current_time = self.start_time + int(self.cap.get(cv2.CAP_PROP_POS_FRAMES) * 1000 / self.fps)
                     self.visualize_frame(frame, current_time)
                     self.draw_frame_info(frame, playback_speed, current_frame)
                     cv2.imshow('Osu! Gameplay', frame)
                 else:
-                    current_time = self.start_time + int(self.cap.get(cv2.CAP_PROP_POS_FRAMES) * 1000 / self.fps)
-                    visible_objects = self.get_current_objects(current_time)
-                    self.process_frame(frame, current_time, visible_objects)
+                    self.process_frame(frame, current_frame, visible_objects)
+                    pbar.update(1)
                 
                 current_frame += 1
             
             if visualize:
-                # Only handle keyboard controls in visualization mode
                 wait_time = int(1000 / (self.fps * playback_speed))
                 key = cv2.waitKey(wait_time) & 0xFF
                 
@@ -292,7 +300,6 @@ class Player:
                 if key == ord('q'):
                     break
                 
-                # Handle frame stepping
                 if paused and (key == ord('f') or key == ord('b')):
                     self.cap.set(cv2.CAP_PROP_POS_FRAMES, current_frame)
                     ret, frame = self.cap.read()
@@ -305,12 +312,16 @@ class Player:
                 if current_frame >= self.frame_count:
                     break
         
+        if not visualize:
+            pbar.close()
+            
         self.cap.release()
         if visualize:
             cv2.destroyAllWindows()
-            
-    def process_frame(self, frame: np.ndarray, current_time: int, visible_objects: List[HitObject]):
-        self.dataset_writer.write_frame(frame, current_time, visible_objects)
+        self.dataset_writer.save()
+
+    def process_frame(self, frame: np.ndarray, current_frame: int, visible_objects: List[HitObject]):
+        self.dataset_writer.write_frame(frame, visible_objects)
     
     def __del__(self):
         """Cleanup when object is destroyed"""

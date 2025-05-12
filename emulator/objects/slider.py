@@ -42,7 +42,6 @@ class Slider(HitObject):
         self.length = length
         self.edge_sounds = edge_sounds or []
         self.edge_additions = edge_additions or []
-        self.ball = None
         self._path_points = None  
         self._validate()
         self.ball = SliderBall(x=self.x, y=self.y, time=self.time)
