@@ -13,3 +13,5 @@ balanced_dataset/
 *.json
 *.txt
 dataset_yolo_*/
+*.mp4
+*.avi

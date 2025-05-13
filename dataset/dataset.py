@@ -39,7 +39,6 @@ class Dataset:
             'circle': 100,
             'slider': 100,
             'spinner': 50,
-            'ball': 50,
             'approaching_circle': 100,
         }
         
@@ -165,11 +164,12 @@ class Dataset:
             raise ValueError(f"No .osu files found in {beatmaps_folder}")
         
         selected_beatmaps = random.sample(beatmap_files, min(num_beatmaps, len(beatmap_files)))
-        
+        logging.info(f"Selected beatmaps: {selected_beatmaps}")
         for beatmap_file in selected_beatmaps:
             try:
                 beatmap_path = os.path.join(beatmaps_folder, beatmap_file)
                 beatmap = beatmap_parser.extract_beatmap(beatmap_path, is_full_path=True)
+                print(beatmap.difficulties, beatmap.title, beatmap.folder_path)
                 available_difficulties = beatmap.difficulties   
                 if not available_difficulties:
                     logging.warning(f"Warning: No difficulties found in {beatmap_file}")
@@ -177,6 +177,7 @@ class Dataset:
                 
                 num_diffs = min(difficulties_per_beatmap, len(available_difficulties))
                 selected_difficulties = random.sample(available_difficulties, num_diffs)
+                logging.info(f"Selected difficulties: {selected_difficulties}")
                 beatmap.parse_difficulties([diff.difficulty_name for diff in selected_difficulties])
                 for difficulty in selected_difficulties:
                     try:
@@ -223,7 +224,7 @@ class Dataset:
         os.makedirs(os.path.join(output_folder, 'labels', 'val'), exist_ok=True)
         
         
-        class_names = ['circle', 'slider', 'spinner', 'ball', 'approaching_circle']
+        class_names = ['circle', 'slider', 'spinner', 'approaching_circle']
         with open(os.path.join(output_folder, 'classes.txt'), 'w') as f:
             f.write('\n'.join(class_names))
         
@@ -245,8 +246,6 @@ class Dataset:
                 if obj_type not in class_names:
                     continue
                 class_idx = class_names.index(obj_type)
-                if obj_type == "approaching_circle":
-                    print(len(boxes))
                 for box in boxes:
                     x1, y1, x2, y2 = box
                     x_center = (x1 + x2) / 2

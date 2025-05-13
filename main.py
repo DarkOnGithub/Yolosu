@@ -91,11 +91,10 @@ if __name__ == "__main__":
         difficulties_per_beatmap=2, 
         visualize=False,
         object_counts={
-            'circle': 1000,
-            'slider': 1000,
+            'circle': 5000,
+            'slider': 1500,
             'spinner': 500,
-            'ball': 1000,
-            'approaching_circle': 1000
+            'approaching_circle': 3000
         }
     )
     dataset.export_yolo(output_folder="./dataset_yolo_test_export", split_ratio=0.8)

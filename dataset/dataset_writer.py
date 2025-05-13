@@ -17,7 +17,7 @@ OBJECT_CLASS_MAP = {
     "hitcircle": "circle",
     "slider": "slider",
     "spinner": "spinner",
-    "ball": "ball",
+    "ball": "circle",
     "approachcircle": "approaching_circle",
 }
 
@@ -95,9 +95,9 @@ class DatasetWriter:
             if key == 'slider':
                 ball_box = obj.ball.get_bounding_box(self.difficulty.difficulty.get_radius())
                 norm_ball = self.normalize_box(ball_box)
-                frame_boxes['ball'].append(norm_ball)
-                frame_objects['ball'] += 1
-                self.index_content['objects_count']['ball'] += 1
+                frame_boxes['circle'].append(norm_ball)
+                frame_objects['circle'] += 1
+                self.index_content['objects_count']["circle"] += 1
                 
         if not any(frame_boxes[k] for k in frame_boxes if k != 'empty'):
             frame_boxes['empty'] = [()]  

@@ -53,9 +53,9 @@ class Player:
         self.resolution_width = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         self.resolution_height = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
         first_hit_time = self.hit_objects[0].time if self.hit_objects else 0
-        start_time = first_hit_time - self.approach_time
+        start_time = first_hit_time - min(1800, self.approach_time)
         if start_time <= 0.01:
-            start_time = -self.approach_time
+            start_time = -min(1800, self.approach_time)
         self.start_time = start_time - 1000
         self.dataset_writer = DatasetWriter(self.beatmap, self.difficulty, self.config.dataset_dir, self.config)
         
@@ -65,6 +65,7 @@ class Player:
         
         beatmap_name = self.beatmap.title
         output_name = f"{beatmap_name}_{self.difficulty.difficulty_name}.mp4"
+        print(output_name)
         output_path = os.path.join(self.config.output_dir, output_name)
         
         if os.path.exists(output_path):
@@ -122,7 +123,7 @@ class Player:
 
         try:
             logging.info(f"Generating video with command: {command}")
-            out = subprocess.run(command, shell=True, check=True)
+            out = subprocess.run(command, shell=True, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
             if out.returncode == 0:
                 logging.info(f"Video generated successfully: {output_path}")
                 return output_path

@@ -1,0 +1,9 @@
+# bytetrack_beatmap.yaml
+tracker_type: bytetrack
+track_high_thresh: 0.25     # Matches conf threshold
+track_low_thresh: 0.1       # Allows weak detections to continue tracks
+new_track_thresh: 0.25      # How confidently a detection starts a new track
+match_thresh: 0.8           # How closely detection must match an existing track
+track_buffer: 30            # Frames to keep track alive without detection
+frame_rate: 144              # Match osu!'s frame rate
+fuse_score: true

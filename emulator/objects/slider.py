@@ -18,7 +18,7 @@ class SliderBall:
         
     def get_bounding_box(self, radius: float) -> Tuple[float, float, float, float]:
         """Get the bounding box of the slider ball (x1, y1, x2, y2)"""
-        ball_radius = radius * 1.6
+        ball_radius = radius
         
         return (
             self.x - ball_radius,

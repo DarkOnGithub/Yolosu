@@ -21,7 +21,7 @@ def _parse_beatmap_path(beatmap_path: str) -> Tuple[int, str, str]:
         raise ValueError(f"Invalid beatmap path format: {beatmap_path}")
 
 class Beatmap:
-    difficulties: List[Difficulty] = []
+    difficulties: List[Difficulty]
     title: str 
     beatmap_id: int
     author: str
@@ -30,8 +30,9 @@ class Beatmap:
     def __init__(self, folder_path: str):
         self.folder_path = folder_path
         (self.beatmap_id, self.title, self.author) = _parse_beatmap_path(os.path.basename(folder_path))
+        self.difficulties = []
         logging.info(f"Initialized Beatmap with ID: {self.beatmap_id}, Title: {self.title}, Author: {self.author}")    
-    
+        
     def add_difficulty(self, difficulty: Difficulty) -> None:
         """Adds a difficulty to the beatmap."""
         self.difficulties.append(difficulty)
