@@ -12,7 +12,7 @@ from .objects.spinner import Spinner
 from .objects.hitcircle import HitCircle
 from emulator.difficulty import Difficulty
 from utils.utils import osu_pixels_to_normal_coords
-from .objects.slider import CurveType
+from maths.curves.curve import CurveType
 from .config import DanserConfig
 from .beatmap import Beatmap
 from dataset.dataset_writer import DatasetWriter
@@ -178,19 +178,18 @@ class Player:
         x1, y1 = osu_pixels_to_normal_coords(x1, y1, self.resolution_width, self.resolution_height)
         x2, y2 = osu_pixels_to_normal_coords(x2, y2, self.resolution_width, self.resolution_height)
         x1, y1, x2, y2 = map(int, [x1, y1, x2, y2])
-
         overlay = frame.copy()
         label = obj.__class__.__name__
         
         color = (0, 255, 0)
         if isinstance(obj, Slider):
-            if obj.curve_type == CurveType.PERFECT:
+            if obj.curve_type == CurveType.CIRCULAR_ARC:
                 label += " Perfect"
                 color = (0, 0, 255)
             elif obj.curve_type == CurveType.BEZIER:
                 label += " Bezier"
                 color = (255, 0, 0)
-            elif obj.curve_type == CurveType.LINEAR:
+            elif obj.curve_type == CurveType.LINE:
                 label += " Linear"
                 color = (0, 255, 0)
             elif obj.curve_type == CurveType.CATMULL:
@@ -227,13 +226,13 @@ class Player:
                 cv2.putText(overlay, "Ball", (ball_x1, ball_y1-10), 
                           cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
         
-    
+
                 
         cv2.rectangle(overlay, (x1, y1), (x2, y2), color, 2)
         cv2.putText(overlay, label, (x1, y1-10), 
                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
-        
         cv2.addWeighted(overlay, alpha, frame, 1 - alpha, 0, frame)
+        
     
     def draw_frame_info(self, frame, playback_speed: float, current_frame: int):
         """Draw playback information on the frame."""
@@ -242,11 +241,6 @@ class Player:
 
     def visualize_frame(self, frame, current_time: int):
         """Visualize objects on the current frame."""
-        
-        if len(frame.shape) == 3:
-            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-            
-            frame = cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR)
         visible_objects = self.get_current_objects(current_time)
         for obj in visible_objects:
             self.draw_bounding_box(frame, obj)
@@ -282,7 +276,18 @@ class Player:
 
         if not visualize:
             pbar = tqdm(total=self.frame_count, desc="Processing frames", unit="frames")
-
+        cv2.namedWindow('Osu! Gameplay', cv2.WINDOW_NORMAL)
+        cv2.resizeWindow('Osu! Gameplay', 1920, 1080)
+        
+        def update_sliders(current_time: int, visible_objects: List[HitObject]):
+            for obj in visible_objects:
+                if isinstance(obj, Slider) and obj.ball and current_time >= obj.time:
+                    duration = obj.calculate_duration(
+                        self.difficulty.difficulty.slider_multiplier,
+                        self.difficulty.timing_points.points
+                    )
+                    obj.update_ball_position(current_time, duration)
+        
         while True:
             if not paused:
                 ret, frame = self.cap.read()
@@ -291,20 +296,11 @@ class Player:
                 
                 current_time = self.start_time + int(self.cap.get(cv2.CAP_PROP_POS_FRAMES) * 1000 / self.fps)
                 visible_objects = self.get_current_objects(current_time)
-                
-                
-                for obj in visible_objects:
-                    if isinstance(obj, Slider) and obj.ball and current_time >= obj.time:
-                        duration = obj.calculate_duration(
-                            self.difficulty.difficulty.slider_multiplier,
-                            self.difficulty.timing_points.points
-                        )
-                        adjusted_time = current_time - int(16.67)
-                        obj.update_ball_position(adjusted_time, duration)
+                update_sliders(current_time, visible_objects)
                 
                 if visualize:
-                    self.visualize_frame(frame, current_time)
                     self.draw_frame_info(frame, playback_speed, current_frame)
+                    self.visualize_frame(frame, current_time)
                     cv2.imshow('Osu! Gameplay', frame)
                 else:
                     self.process_frame(frame, current_time, visible_objects)
@@ -322,10 +318,14 @@ class Player:
                     break
                 
                 if paused and (key == ord('f') or key == ord('b')):
+                    frame_time = int(current_frame * 1000 / self.fps)
+                    current_time = self.start_time + frame_time
+                    visible_objects = self.get_current_objects(current_time)
+                    update_sliders(current_time, visible_objects)
+                    
                     self.cap.set(cv2.CAP_PROP_POS_FRAMES, current_frame)
                     ret, frame = self.cap.read()
                     if ret:
-                        current_time = self.start_time + int(current_frame * 1000 / self.fps)
                         self.visualize_frame(frame, current_time)
                         self.draw_frame_info(frame, playback_speed, current_frame)
                         cv2.imshow('Osu! Gameplay', frame)

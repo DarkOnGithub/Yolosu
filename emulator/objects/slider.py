@@ -1,7 +1,8 @@
 from typing import List, Tuple, Optional
 from .base import HitObject, HitObjectType
-from .curve import CurveType, calculate_linear_points, calculate_perfect_circle_points, calculate_bezier_points, calculate_catmull_points
+from maths.curves.curve import CurveType, MultiCurve, CurveDef
 from .approaching_circle import ApproachCircle
+import math
 
 class SliderBall:
     """Represents the slider ball that follows the slider path"""
@@ -19,7 +20,6 @@ class SliderBall:
     def get_bounding_box(self, radius: float) -> Tuple[float, float, float, float]:
         """Get the bounding box of the slider ball (x1, y1, x2, y2)"""
         ball_radius = radius
-        
         return (
             self.x - ball_radius,
             self.y - ball_radius,
@@ -29,6 +29,9 @@ class SliderBall:
 
 class Slider(HitObject):
     """Represents a slider in osu!"""
+    MAX_PATH_LENGTH = 100_000_000  # Sanity limits
+    MAX_REPEATS = 10_000  # Same limit as osu!
+
     def __init__(self, x: int, y: int, time: int, type: HitObjectType, 
                  hit_sound: int, approach_time: float, curve_type: str = "L",
                  control_points: List[Tuple[int, int]] = None,
@@ -41,20 +44,28 @@ class Slider(HitObject):
         self.approaching_circle = ApproachCircle(x, y, time, approach_time)
         self.curve_type = curve_type
         self.control_points = control_points or []
-        self.slides = slides
-        self.length = length
+        self.slides = min(slides, self.MAX_REPEATS)
+        self.length = min(length, self.MAX_PATH_LENGTH)
         self.edge_sounds = edge_sounds or []
         self.edge_additions = edge_additions or []
-        self._path_points = None  
+        self._path_points = None
         self._validate()
         self.ball = SliderBall(x=self.x, y=self.y, time=self.time)
         
-        
-        if self.curve_type == CurveType.PERFECT:
+        # Convert curve type string to CurveType enum
+        if self.curve_type == "P":
             if len(self.control_points) < 2:
-                self.curve_type = CurveType.LINEAR
+                self.curve_type = CurveType.LINE
             elif len(self.control_points) > 2:
                 self.curve_type = CurveType.BEZIER
+            else:
+                self.curve_type = CurveType.CIRCULAR_ARC
+        elif self.curve_type == "L":
+            self.curve_type = CurveType.LINE
+        elif self.curve_type == "B":
+            self.curve_type = CurveType.BEZIER
+        elif self.curve_type == "C":
+            self.curve_type = CurveType.CATMULL
 
     def _validate(self):
         """Validate slider specific data"""
@@ -90,41 +101,24 @@ class Slider(HitObject):
         for cp in self.control_points:
             if cp != (self.x, self.y): 
                 control_points.append(cp)
-        
-        if self.curve_type == CurveType.LINEAR:
-            if len(control_points) < 2:
-                return [start_point] * num_points
-            path_points = calculate_linear_points(
-                start_point,
-                control_points[-1],
-                len(control_points)
-            )
-        elif self.curve_type == CurveType.PERFECT:
-            if len(control_points) != 3:
-                if len(control_points) >= 2:
-                    return calculate_linear_points(start_point, control_points[-1], num_points)
-                return [start_point] * num_points
-            
-            path_points = calculate_perfect_circle_points(
-                control_points[0],  
-                control_points[1],  
-                control_points[2],  
-                len(control_points)
-            )
-        elif self.curve_type == CurveType.BEZIER:
-            path_points = calculate_bezier_points(
-                control_points            )
-        elif self.curve_type == CurveType.CATMULL:
-            if len(control_points) < 4:
-                return calculate_bezier_points(control_points)
-                
-            path_points = calculate_catmull_points(
-                control_points,
-                len(control_points)
-            )
-        else:
-            raise ValueError(f"Unknown curve type: {self.curve_type}")
-        
+
+        # Create curve definition
+        curve_def = CurveDef(
+            curve_type=self.curve_type,
+            points=control_points
+        )
+
+        # Create multi-curve
+        multi_curve = MultiCurve([curve_def])
+
+        # Get points along the curve
+        path_points = []
+        for i in range(num_points):
+            t = i / (num_points - 1)
+            point = multi_curve.point_at(t)
+            path_points.append(point)
+
+        # Scale points to match desired length
         if len(path_points) > 1:
             total_length = 0
             for i in range(1, len(path_points)):
@@ -152,34 +146,50 @@ class Slider(HitObject):
         if not self.ball:
             return
         
+        # Calculate time progress (0 to 1)
         time_progress = (current_time - self.time) / duration
         time_progress = max(0.0, min(1.0, time_progress))
         
+        # Calculate which slide we're on and progress within that slide
         total_slides = self.slides
         slide_number = int(time_progress * total_slides)
         slide_progress = (time_progress * total_slides) - slide_number
         
+        # Handle edge case where we're at the end
         if slide_number >= total_slides:
             slide_number = total_slides - 1
             slide_progress = 1.0
         
-        path_points = self.calculate_path_points(1000)  
+        # Get path points
+        path_points = self.calculate_path_points(1000)
         
-        if slide_number % 2 == 1:  
+        # Reverse direction for odd-numbered slides
+        if slide_number % 2 == 1:
             slide_progress = 1.0 - slide_progress
+            path_points = path_points[::-1]  # Reverse the path for odd slides
         
+        # Calculate position along the path
         point_index = slide_progress * (len(path_points) - 1)
         index1 = int(point_index)
         index2 = min(index1 + 1, len(path_points) - 1)
         t = point_index - index1
         
+        # Interpolate between points
         p1 = path_points[index1]
         p2 = path_points[index2]
         
         x = p1[0] + t * (p2[0] - p1[0])
         y = p1[1] + t * (p2[1] - p1[1])
         
+        # Update ball position
         self.ball.update_position(x, y, current_time)
+        
+        # Calculate ball rotation based on movement direction
+        if index2 > index1:
+            dx = p2[0] - p1[0]
+            dy = p2[1] - p1[1]
+            angle = math.atan2(dy, dx)
+            # You can use this angle to rotate the ball sprite if needed
         
     @classmethod
     def from_line(cls, line: str) -> 'Slider':

@@ -2,7 +2,6 @@ from .base import HitObject, HitObjectType
 from .hitcircle import HitCircle
 from .slider import Slider, SliderBall
 from .spinner import Spinner
-from .curve import CurveType
 from .approaching_circle import ApproachCircle
 
 __all__ = [
@@ -12,6 +11,5 @@ __all__ = [
     'Slider',
     'SliderBall',
     'Spinner',
-    'CurveType',
     'ApproachCircle'
 ] 
