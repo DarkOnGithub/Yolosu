@@ -36,8 +36,8 @@ logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 logger.handlers = [handler]  
 config = DanserConfig(
-    width=1920,
-    height=1080,
+    width=1280,
+    height=720,
     fps=60,
     quickstart=True,
     mods="AT",
@@ -45,9 +45,9 @@ config = DanserConfig(
     skin="Aristia(Edit)+trail"
 )
 
-beatmap = beatmap_parser.extract_beatmap("Flowering Night Fever", False)
-beatmap.parse_difficulties("pishi's Lunatic")
-diff = beatmap.get_difficulty("pishi's Lunatic")
+beatmap = beatmap_parser.extract_beatmap("Time to say goodbye", False)
+beatmap.parse_difficulties("No Return")
+diff = beatmap.get_difficulty("No Return")
 
 player = Player(beatmap=beatmap, difficulty=diff, config=config)
 player.play(visualize=True)

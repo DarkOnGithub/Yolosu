@@ -54,14 +54,14 @@ class Slider(HitObject):
         self.ball = SliderBall(x=self.x, y=self.y, time=self.time)
         self.repeat_points = []
         
-        # Convert curve type string to CurveType enum
-        if self.curve_type == "P":
+        if self.curve_type == "P":            
             if len(self.control_points) < 2:
                 self.curve_type = CurveType.LINE
             elif len(self.control_points) > 2:
                 self.curve_type = CurveType.BEZIER
             else:
                 self.curve_type = CurveType.CIRCULAR_ARC
+                
         elif self.curve_type == "L":
             self.curve_type = CurveType.LINE
         elif self.curve_type == "B":
@@ -100,54 +100,26 @@ class Slider(HitObject):
         
     def calculate_path_points(self, num_points: int = 2000) -> List[Tuple[float, float]]:
         """Calculate the points along the slider path"""
-        if self._path_points is not None and len(self._path_points) == num_points:
-            return self._path_points
-
-        start_point = (float(self.x), float(self.y))
-        control_points = [start_point]
-        for cp in self.control_points:
-            if cp != (self.x, self.y): 
-                control_points.append((float(cp[0]), float(cp[1])))
-
+        if not self.control_points:
+            return [(self.x, self.y)]
+            
         # Create curve definition
         curve_def = CurveDef(
             curve_type=self.curve_type,
-            points=control_points
+            points=[(self.x, self.y)] + self.control_points
         )
-
+        
         # Create multi-curve
         multi_curve = MultiCurve([curve_def])
-
-        # Get points along the curve using double precision
-        path_points = []
-        for i in range(num_points):
-            t = float(i) / float(num_points - 1)
-            point = multi_curve.point_at(t)
-            path_points.append((float(point[0]), float(point[1])))
-
-        # Scale points to match desired length using double precision
-        if len(path_points) > 1:
-            total_length = 0.0
-            for i in range(1, len(path_points)):
-                dx = float(path_points[i][0] - path_points[i-1][0])
-                dy = float(path_points[i][1] - path_points[i-1][1])
-                total_length += float((dx*dx + dy*dy) ** 0.5)
-            
-            if total_length > 0.0:
-                scale = float(self.length) / total_length
-                scaled_points = []
-                for x, y in path_points:
-                    dx = float(x - start_point[0])
-                    dy = float(y - start_point[1])
-                    scaled_points.append((
-                        float(start_point[0] + dx * scale),
-                        float(start_point[1] + dy * scale)
-                    ))
-                path_points = scaled_points
         
-        self._path_points = path_points
-        return path_points
-            
+        points = []
+        for i in range(num_points):
+            t = i / (num_points - 1)
+            point = multi_curve.point_at(t)
+            points.append(point)
+        self._path_points = points
+        return points
+
     def update_ball_position(self, current_time: int, duration: float):
         """Update the slider ball position based on current time"""
         if not self.ball:
@@ -202,19 +174,6 @@ class Slider(HitObject):
         # Update ball position
         self.ball.update_position(float(x), float(y), current_time)
         
-    def update(self, current_time: int):
-        """Update the slider and its components"""
-        # Update ball position
-        if self.ball:
-            duration = self.calculate_duration(
-                self.difficulty.difficulty.slider_multiplier,
-                self.difficulty.timing_points.points
-            )
-            self.update_ball_position(current_time, duration)
-            
-        # Update repeat points
-        for repeat_point in self.repeat_points:
-            repeat_point.update(current_time)
         
     @classmethod
     def from_line(cls, line: str) -> 'Slider':

@@ -196,16 +196,19 @@ class Player:
             elif obj.curve_type == CurveType.CATMULL:
                 label += " Catmull"
                 color = (255, 255, 0)
-            
+
+            for c_point in obj._path_points:
+                cx, cy = osu_pixels_to_normal_coords(c_point[0], c_point[1], self.resolution_width, self.resolution_height)
+                cx, cy = int(cx), int(cy)
+                cv2.circle(overlay, (cx, cy), 10, (128, 128, 0), -1)  
             control_points = [(obj.x, obj.y)] + obj.control_points
             for i, (cx, cy) in enumerate(control_points):
                 cx, cy = osu_pixels_to_normal_coords(cx, cy, self.resolution_width, self.resolution_height)
                 cx, cy = int(cx), int(cy)
-                cv2.circle(overlay, (cx, cy), 5, (255, 0, 255), -1)  
+                cv2.circle(overlay, (cx, cy), 10, (0, 128, 0), -1)  
                 cv2.putText(overlay, f"CP{i}", (cx+5, cy+5), 
                           cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 255), 1)
             
-            # Draw repeat points
             for i, repeat_point in enumerate(obj.repeat_points):
                 rx, ry = osu_pixels_to_normal_coords(repeat_point.x, repeat_point.y, 
                                                    self.resolution_width, self.resolution_height)
@@ -213,14 +216,14 @@ class Player:
                 
                 # Draw repeat point circle
                 repeat_color = (0, 255, 255) if repeat_point.is_reverse else (255, 255, 0)
-                cv2.rectangle(overlay, (rx, ry), (rx, ry), repeat_color, 2)
+                # cv2.rectangle(overlay, (rx, ry), (rx, ry), repeat_color, 2)
                 
                 # Draw repeat point label
                 label = f"R{i+1}"
                 if repeat_point.is_reverse:
                     label += "R"  # R for reverse
-                cv2.putText(overlay, label, (rx+5, ry+5),
-                          cv2.FONT_HERSHEY_SIMPLEX, 0.5, repeat_color, 1)
+                # cv2.putText(overlay, label, (rx+5, ry+5),
+                #           cv2.FONT_HERSHEY_SIMPLEX, 0.5, repeat_color, 1)
             
             path_points = obj.calculate_path_points(1000)
             for i in range(len(path_points)-1):
@@ -228,24 +231,26 @@ class Player:
                 p2 = path_points[i+1]
                 p1x, p1y = osu_pixels_to_normal_coords(p1[0], p1[1], self.resolution_width, self.resolution_height)
                 p2x, p2y = osu_pixels_to_normal_coords(p2[0], p2[1], self.resolution_width, self.resolution_height)
-                cv2.line(overlay, (int(p1x), int(p1y)), (int(p2x), int(p2y)), color, 1)
+                cv2.line(overlay, (int(p1x), int(p1y)), (int(p2x), int(p2y)), color, 3)
             
             if obj.ball:
                 ball_x1, ball_y1, ball_x2, ball_y2 = obj.ball.get_bounding_box(self.radius)
                 ball_x1, ball_y1 = osu_pixels_to_normal_coords(ball_x1, ball_y1, self.resolution_width, self.resolution_height)
                 ball_x2, ball_y2 = osu_pixels_to_normal_coords(ball_x2, ball_y2, self.resolution_width, self.resolution_height)
                 ball_x1, ball_y1, ball_x2, ball_y2 = map(int, [ball_x1, ball_y1, ball_x2, ball_y2])
-                
-                cv2.rectangle(overlay, (ball_x1, ball_y1), (ball_x2, ball_y2), (255, 0, 255), 3)
+                #add cross
+                cv2.line(overlay, (ball_x1, ball_y1), (ball_x2, ball_y2), (255, 0, 255), 4)
+                cv2.line(overlay, (ball_x1, ball_y2), (ball_x2, ball_y1), (255, 0, 255), 4)
+                cv2.rectangle(overlay, (ball_x1, ball_y1), (ball_x2, ball_y2), (255, 0, 255), 4)
                 cv2.putText(overlay, "Ball", (ball_x1, ball_y1-10), 
                           cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
         
         elif isinstance(obj, RepeatPoint):
             label += f" {'R' if obj.is_reverse else 'F'}{obj.edge_index}"
             color = (0, 255, 255) if obj.is_reverse else (255, 255, 0)
-        
-        cv2.rectangle(overlay, (x1, y1), (x2, y2), color, 2)
-        cv2.putText(overlay, label, (x1, y1-5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
+        if isinstance(obj, Slider):
+            cv2.rectangle(overlay, (x1, y1), (x2, y2), color, 2)
+            cv2.putText(overlay, label, (x1, y1-5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
         
         cv2.addWeighted(overlay, alpha, frame, 1-alpha, 0, frame)
         
@@ -296,6 +301,7 @@ class Player:
         cv2.resizeWindow('Osu! Gameplay', 1920, 1080)
         
         def update_sliders(current_time: int, visible_objects: List[HitObject]):
+            current_time -= int(16.67)
             for obj in visible_objects:
                 if isinstance(obj, Slider) and obj.ball and current_time >= obj.time:
                     duration = obj.calculate_duration(

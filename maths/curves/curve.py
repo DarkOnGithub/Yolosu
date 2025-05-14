@@ -5,24 +5,22 @@ import math
 from enum import IntEnum
 import bisect
 from .linear import Linear
+import cv2
+
 def process_bezier(points: List[Tuple[float, float]]) -> List[Tuple[float, float]]:
     out_points = []
     last_index = 0
-    i = 0
-
-    while i < len(points):
+    for i in range(len(points)):
         multi = i < len(points) - 2 and points[i] == points[i + 1]
-
         if multi or i == len(points) - 1:
             sub_points = points[last_index:i + 1]
-
             if len(sub_points) == 2:
                 inter = sub_points
             else:
                 approximator = BezierApproximator(sub_points)
                 inter = approximator.create_bezier()
 
-            if not out_points or out_points[-1] != inter[0]:
+            if len(out_points) == 0 or out_points[-1] != inter[0]:
                 out_points.extend(inter)
             else:
                 out_points.extend(inter[1:])
@@ -30,19 +28,15 @@ def process_bezier(points: List[Tuple[float, float]]) -> List[Tuple[float, float
             if multi:
                 i += 1
             last_index = i + 1
-        i += 1
 
     return out_points
 
 def process_linear(points: List[Tuple[float, float]]) -> List[Tuple[float, float]]:
     out_points = []
-    
     for i in range(len(points)):
         if i < len(points) - 1 and points[i] == points[i + 1]:  
             continue
-            
         out_points.append(points[i])
-    
     return out_points
 
 def approximate_circular_arc(pt1: Tuple[float, float], pt2: Tuple[float, float], pt3: Tuple[float, float], detail: float = 0.5) -> List[Tuple[float, float]]:
@@ -127,39 +121,34 @@ class MultiCurve:
         for curve_def in curve_defs:
             c_points1 = self._process_curve(curve_def, False)
             c_points2 = c_points1 if curve_def.curve_type != CurveType.CIRCULAR_ARC else self._process_curve(curve_def, True)
-
-            # Add lines
+        
             n_lines = [None] * max(0, len(self.lines) + len(c_points1) - 1)
             n_lines[:len(self.lines)] = self.lines
             for i in range(len(c_points1) - 1):
                 n_lines[len(self.lines) + i] = Linear(c_points1[i], c_points1[i + 1])
             self.lines = n_lines
 
-            # Add points
             skip = 1 if self.points and self.points[-1] == c_points2[0] else 0
             n_points = [None] * (len(self.points) + len(c_points2) - skip)
             n_points[:len(self.points)] = self.points
             n_points[len(self.points):] = c_points2[skip:]
             self.points = n_points
 
-        # Calculate lengths
         self.length = sum(line.get_length() for line in self.lines)
 
-        # Calculate cumulative lengths
         self.cum_length = [0.0] * max(1, len(self.points))
         for i in range(len(self.points) - 1):
             self.cum_length[i + 1] = self.cum_length[i] + math.sqrt(
                 (self.points[i + 1][0] - self.points[i][0])**2 + 
                 (self.points[i + 1][1] - self.points[i][1])**2
             )
-
-        # Calculate sections
+        
         self.sections = [0.0] * (len(self.lines) + 1)
         prev = 0.0
         for i in range(len(self.lines)):
             prev += self.lines[i].get_length()
             self.sections[i + 1] = prev
-
+        
     def _process_curve(self, curve_def: CurveDef, lazer: bool) -> List[Tuple[float, float]]:
         if curve_def.curve_type == CurveType.CIRCULAR_ARC:
             return process_perfect(curve_def.points)
