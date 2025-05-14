@@ -1,10 +1,10 @@
 from .bezier_approximator import BezierApproximator
-from .CircularArc import CircularArc
+from .circular_arc import CircularArc
 from typing import List, Tuple, Optional
 import math
 from enum import IntEnum
 import bisect
-
+from .linear import Linear
 def process_bezier(points: List[Tuple[float, float]]) -> List[Tuple[float, float]]:
     out_points = []
     last_index = 0
@@ -45,7 +45,7 @@ def process_linear(points: List[Tuple[float, float]]) -> List[Tuple[float, float
     
     return out_points
 
-def approximate_circular_arc(pt1: Tuple[float, float], pt2: Tuple[float, float], pt3: Tuple[float, float], detail: float = 0.125) -> List[Tuple[float, float]]:
+def approximate_circular_arc(pt1: Tuple[float, float], pt2: Tuple[float, float], pt3: Tuple[float, float], detail: float = 0.5) -> List[Tuple[float, float]]:
     arc = CircularArc(pt1, pt2, pt3)
     
     if arc.unstable:
@@ -80,29 +80,7 @@ class CurveDef:
     def __init__(self, curve_type: CurveType, points: List[Tuple[float, float]]):
         self.curve_type = curve_type
         self.points = points
-
-class Linear:
-    def __init__(self, point1: Tuple[float, float], point2: Tuple[float, float]):
-        self.point1 = point1
-        self.point2 = point2
-        self.custom_length: Optional[float] = None
-
-    def get_length(self) -> float:
-        if self.custom_length is not None:
-            return self.custom_length
-        return math.sqrt((self.point2[0] - self.point1[0])**2 + (self.point2[1] - self.point1[1])**2)
-
-    def point_at(self, t: float) -> Tuple[float, float]:
-        return (
-            self.point1[0] + (self.point2[0] - self.point1[0]) * t,
-            self.point1[1] + (self.point2[1] - self.point1[1]) * t
-        )
-
-    def get_start_angle(self) -> float:
-        return math.atan2(self.point2[1] - self.point1[1], self.point2[0] - self.point1[0])
-
-    def get_end_angle(self) -> float:
-        return self.get_start_angle()
+    
 def process_catmull(points: List[Tuple[float, float]]) -> List[Tuple[float, float]]:
     out_points = []
     
@@ -118,9 +96,9 @@ def process_catmull(points: List[Tuple[float, float]]) -> List[Tuple[float, floa
             p3[1] + (p3[1] - p2[1])
         )
         
-        # Approximate Catmull-Rom curve with 50 points
-        for t in range(50):
-            t = t / 49.0
+        # Approximate Catmull-Rom curve with 100 points (increased from 50)
+        for t in range(100):
+            t = t / 99.0
             point = (
                 (-0.5 * p1[0] + 1.5 * p2[0] - 1.5 * p3[0] + 0.5 * p4[0]) * t**3 +
                 (p1[0] - 2.5 * p2[0] + 2 * p3[0] - 0.5 * p4[0]) * t**2 +

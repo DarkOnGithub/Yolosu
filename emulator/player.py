@@ -17,6 +17,7 @@ from .config import DanserConfig
 from .beatmap import Beatmap
 from dataset.dataset_writer import DatasetWriter
 from .objects.approaching_circle import ApproachCircle
+from .objects.repeat_point import RepeatPoint
 
 class Player:
     def __init__(self, beatmap: Beatmap, difficulty: Difficulty, config: Optional[DanserConfig] = None):
@@ -171,7 +172,7 @@ class Player:
     def draw_bounding_box(self, frame: np.ndarray, obj: HitObject, alpha: float = 0.5, current_time: float = 0):
         """Draw a bounding box for a hit object on the frame"""
         if isinstance(obj, ApproachCircle):
-            x1, y1, x2, y2 = obj.get_bounding_box(current_time, self.radius)
+            x1, y1, x2, y2 = obj.get_bounding_box(self.radius, current_time)
         else:
             x1, y1, x2, y2 = obj.get_bounding_box(self.radius)
         
@@ -202,19 +203,32 @@ class Player:
                 cx, cy = int(cx), int(cy)
                 cv2.circle(overlay, (cx, cy), 5, (255, 0, 255), -1)  
                 cv2.putText(overlay, f"CP{i}", (cx+5, cy+5), 
-                          cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 255), 2)
+                          cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 255), 1)
+            
+            # Draw repeat points
+            for i, repeat_point in enumerate(obj.repeat_points):
+                rx, ry = osu_pixels_to_normal_coords(repeat_point.x, repeat_point.y, 
+                                                   self.resolution_width, self.resolution_height)
+                rx, ry = int(rx), int(ry)
+                
+                # Draw repeat point circle
+                repeat_color = (0, 255, 255) if repeat_point.is_reverse else (255, 255, 0)
+                cv2.rectangle(overlay, (rx, ry), (rx, ry), repeat_color, 2)
+                
+                # Draw repeat point label
+                label = f"R{i+1}"
+                if repeat_point.is_reverse:
+                    label += "R"  # R for reverse
+                cv2.putText(overlay, label, (rx+5, ry+5),
+                          cv2.FONT_HERSHEY_SIMPLEX, 0.5, repeat_color, 1)
             
             path_points = obj.calculate_path_points(1000)
-            for i, (px, py) in enumerate(path_points):
-                px, py = osu_pixels_to_normal_coords(px, py, self.resolution_width, self.resolution_height)
-                px, py = int(px), int(py)
-                cv2.circle(overlay, (px, py), 2, (0, 255, 255), -1)  
-                
-                if i > 0:
-                    prev_px, prev_py = osu_pixels_to_normal_coords(path_points[i-1][0], path_points[i-1][1], 
-                                                                 self.resolution_width, self.resolution_height)
-                    prev_px, prev_py = int(prev_px), int(prev_py)
-                    cv2.line(overlay, (prev_px, prev_py), (px, py), (0, 255, 255), 1)
+            for i in range(len(path_points)-1):
+                p1 = path_points[i]
+                p2 = path_points[i+1]
+                p1x, p1y = osu_pixels_to_normal_coords(p1[0], p1[1], self.resolution_width, self.resolution_height)
+                p2x, p2y = osu_pixels_to_normal_coords(p2[0], p2[1], self.resolution_width, self.resolution_height)
+                cv2.line(overlay, (int(p1x), int(p1y)), (int(p2x), int(p2y)), color, 1)
             
             if obj.ball:
                 ball_x1, ball_y1, ball_x2, ball_y2 = obj.ball.get_bounding_box(self.radius)
@@ -224,14 +238,16 @@ class Player:
                 
                 cv2.rectangle(overlay, (ball_x1, ball_y1), (ball_x2, ball_y2), (255, 0, 255), 3)
                 cv2.putText(overlay, "Ball", (ball_x1, ball_y1-10), 
-                          cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
+                          cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
         
-
-                
+        elif isinstance(obj, RepeatPoint):
+            label += f" {'R' if obj.is_reverse else 'F'}{obj.edge_index}"
+            color = (0, 255, 255) if obj.is_reverse else (255, 255, 0)
+        
         cv2.rectangle(overlay, (x1, y1), (x2, y2), color, 2)
-        cv2.putText(overlay, label, (x1, y1-10), 
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
-        cv2.addWeighted(overlay, alpha, frame, 1 - alpha, 0, frame)
+        cv2.putText(overlay, label, (x1, y1-5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
+        
+        cv2.addWeighted(overlay, alpha, frame, 1-alpha, 0, frame)
         
     
     def draw_frame_info(self, frame, playback_speed: float, current_frame: int):
@@ -243,7 +259,7 @@ class Player:
         """Visualize objects on the current frame."""
         visible_objects = self.get_current_objects(current_time)
         for obj in visible_objects:
-            self.draw_bounding_box(frame, obj)
+            self.draw_bounding_box(frame, obj, current_time=current_time)
         cv2.imshow('Osu! Gameplay', frame)
 
     def handle_playback_controls(self, key: int, paused: bool, playback_speed: float, current_frame: int) -> Tuple[bool, float, int]:

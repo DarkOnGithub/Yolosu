@@ -187,7 +187,7 @@ class Dataset:
                         writer = DatasetWriter(
                             beatmap=beatmap,
                             difficulty=difficulty,
-                            dataset_path=os.path.join(output_folder, f"{beatmap.title}_{difficulty.difficulty_name}_dataset.json"),
+                            dataset_path=output_folder,
                             config=config
                         )
                         

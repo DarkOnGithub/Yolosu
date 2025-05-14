@@ -2,6 +2,7 @@ from typing import List, Tuple, Optional
 from .base import HitObject, HitObjectType
 from maths.curves.curve import CurveType, MultiCurve, CurveDef
 from .approaching_circle import ApproachCircle
+from .repeat_point import RepeatPoint
 import math
 
 class SliderBall:
@@ -51,6 +52,7 @@ class Slider(HitObject):
         self._path_points = None
         self._validate()
         self.ball = SliderBall(x=self.x, y=self.y, time=self.time)
+        self.repeat_points = []
         
         # Convert curve type string to CurveType enum
         if self.curve_type == "P":
@@ -79,10 +81,15 @@ class Slider(HitObject):
             raise ValueError(f"Slider length must be positive, got {self.length}")
     
     def get_bounding_box(self, radius: int) -> Tuple[float, float, float, float]:
-        """Get the bounding box of the slider (x1, y1, x2, y2)"""
+        """Get the bounding box of the slider including all repeat points"""
         path_points = self.calculate_path_points()
         x_coords = [p[0] for p in path_points]
         y_coords = [p[1] for p in path_points]
+        
+        # Include repeat points in bounding box
+        for repeat_point in self.repeat_points:
+            x_coords.append(repeat_point.x)
+            y_coords.append(repeat_point.y)
         
         return (
             min(x_coords) - radius,  
@@ -91,16 +98,16 @@ class Slider(HitObject):
             max(y_coords) + radius   
         )
         
-    def calculate_path_points(self, num_points: int = 300) -> List[Tuple[float, float]]:
+    def calculate_path_points(self, num_points: int = 2000) -> List[Tuple[float, float]]:
         """Calculate the points along the slider path"""
         if self._path_points is not None and len(self._path_points) == num_points:
             return self._path_points
 
-        start_point = (self.x, self.y)
-        control_points = [(self.x, self.y)]
+        start_point = (float(self.x), float(self.y))
+        control_points = [start_point]
         for cp in self.control_points:
             if cp != (self.x, self.y): 
-                control_points.append(cp)
+                control_points.append((float(cp[0]), float(cp[1])))
 
         # Create curve definition
         curve_def = CurveDef(
@@ -111,30 +118,30 @@ class Slider(HitObject):
         # Create multi-curve
         multi_curve = MultiCurve([curve_def])
 
-        # Get points along the curve
+        # Get points along the curve using double precision
         path_points = []
         for i in range(num_points):
-            t = i / (num_points - 1)
+            t = float(i) / float(num_points - 1)
             point = multi_curve.point_at(t)
-            path_points.append(point)
+            path_points.append((float(point[0]), float(point[1])))
 
-        # Scale points to match desired length
+        # Scale points to match desired length using double precision
         if len(path_points) > 1:
-            total_length = 0
+            total_length = 0.0
             for i in range(1, len(path_points)):
-                dx = path_points[i][0] - path_points[i-1][0]
-                dy = path_points[i][1] - path_points[i-1][1]
-                total_length += (dx*dx + dy*dy) ** 0.5
+                dx = float(path_points[i][0] - path_points[i-1][0])
+                dy = float(path_points[i][1] - path_points[i-1][1])
+                total_length += float((dx*dx + dy*dy) ** 0.5)
             
-            if total_length > 0:
-                scale = self.length / total_length
+            if total_length > 0.0:
+                scale = float(self.length) / total_length
                 scaled_points = []
                 for x, y in path_points:
-                    dx = x - start_point[0]
-                    dy = y - start_point[1]
+                    dx = float(x - start_point[0])
+                    dy = float(y - start_point[1])
                     scaled_points.append((
-                        start_point[0] + dx * scale,
-                        start_point[1] + dy * scale
+                        float(start_point[0] + dx * scale),
+                        float(start_point[1] + dy * scale)
                     ))
                 path_points = scaled_points
         
@@ -145,51 +152,69 @@ class Slider(HitObject):
         """Update the slider ball position based on current time"""
         if not self.ball:
             return
-        
-        # Calculate time progress (0 to 1)
-        time_progress = (current_time - self.time) / duration
-        time_progress = max(0.0, min(1.0, time_progress))
-        
+            
         # Calculate which slide we're on and progress within that slide
-        total_slides = self.slides
-        slide_number = int(time_progress * total_slides)
-        slide_progress = (time_progress * total_slides) - slide_number
-        
-        # Handle edge case where we're at the end
-        if slide_number >= total_slides:
-            slide_number = total_slides - 1
-            slide_progress = 1.0
+        slide_duration = duration / self.slides
+        current_slide = min(int((current_time - self.time) / slide_duration), self.slides - 1)
+        slide_progress = ((current_time - self.time) % slide_duration) / slide_duration
         
         # Get path points
-        path_points = self.calculate_path_points(1000)
+        path_points = self.calculate_path_points(2000)
         
-        # Reverse direction for odd-numbered slides
-        if slide_number % 2 == 1:
+        # For odd-numbered slides (1, 3, etc.), we need to reverse the path
+        if current_slide % 2 == 1:
             slide_progress = 1.0 - slide_progress
-            path_points = path_points[::-1]  # Reverse the path for odd slides
-        
+            path_points = path_points[::-1]
+            
         # Calculate position along the path
         point_index = slide_progress * (len(path_points) - 1)
         index1 = int(point_index)
         index2 = min(index1 + 1, len(path_points) - 1)
         t = point_index - index1
         
-        # Interpolate between points
-        p1 = path_points[index1]
-        p2 = path_points[index2]
-        
-        x = p1[0] + t * (p2[0] - p1[0])
-        y = p1[1] + t * (p2[1] - p1[1])
+        # Use cubic interpolation for smoother movement
+        if index1 > 0 and index2 < len(path_points) - 1:
+            p0 = path_points[index1 - 1]
+            p1 = path_points[index1]
+            p2 = path_points[index2]
+            p3 = path_points[index2 + 1]
+            
+            # Cubic interpolation
+            t2 = t * t
+            t3 = t2 * t
+            
+            x = (-0.5 * p0[0] + 1.5 * p1[0] - 1.5 * p2[0] + 0.5 * p3[0]) * t3 + \
+                (p0[0] - 2.5 * p1[0] + 2 * p2[0] - 0.5 * p3[0]) * t2 + \
+                (-0.5 * p0[0] + 0.5 * p2[0]) * t + \
+                p1[0]
+                
+            y = (-0.5 * p0[1] + 1.5 * p1[1] - 1.5 * p2[1] + 0.5 * p3[1]) * t3 + \
+                (p0[1] - 2.5 * p1[1] + 2 * p2[1] - 0.5 * p3[1]) * t2 + \
+                (-0.5 * p0[1] + 0.5 * p2[1]) * t + \
+                p1[1]
+        else:
+            # Fallback to linear interpolation at the edges
+            p1 = path_points[index1]
+            p2 = path_points[index2]
+            x = p1[0] + t * (p2[0] - p1[0])
+            y = p1[1] + t * (p2[1] - p1[1])
         
         # Update ball position
-        self.ball.update_position(x, y, current_time)
+        self.ball.update_position(float(x), float(y), current_time)
         
-        # Calculate ball rotation based on movement direction
-        if index2 > index1:
-            dx = p2[0] - p1[0]
-            dy = p2[1] - p1[1]
-            angle = math.atan2(dy, dx)
-            # You can use this angle to rotate the ball sprite if needed
+    def update(self, current_time: int):
+        """Update the slider and its components"""
+        # Update ball position
+        if self.ball:
+            duration = self.calculate_duration(
+                self.difficulty.difficulty.slider_multiplier,
+                self.difficulty.timing_points.points
+            )
+            self.update_ball_position(current_time, duration)
+            
+        # Update repeat points
+        for repeat_point in self.repeat_points:
+            repeat_point.update(current_time)
         
     @classmethod
     def from_line(cls, line: str) -> 'Slider':
@@ -257,6 +282,7 @@ class Slider(HitObject):
 
     def calculate_duration(self, slider_multiplier: float, timing_points) -> int:
         """Calculate the total duration of the slider in milliseconds"""
+        print(slider_multiplier)
         slider_velocity = 1.0
         beat_length = 1000.0
         
@@ -268,4 +294,32 @@ class Slider(HitObject):
                     slider_velocity = -100 / timing_point.beat_length
         
         slide_duration = (self.length / (slider_multiplier * 100 * slider_velocity)) * beat_length
-        return int(slide_duration * self.slides)
+        total_duration = int(slide_duration * self.slides)
+        
+        # Create repeat points - only for actual repeats (not including start point)
+        self.repeat_points = []
+        for i in range(1, self.slides):  # Changed from self.slides + 1 to self.slides
+            repeat_time = self.time + int(slide_duration * i)
+            is_reverse = i % 2 == 1
+            
+            # Calculate position at repeat point
+            path_points = self.calculate_path_points()
+            if is_reverse:
+                pos = path_points[0]  # Start position for reverse
+            else:
+                pos = path_points[-1]  # End position for forward
+                
+            repeat_point = RepeatPoint(
+                x=int(pos[0]),
+                y=int(pos[1]),
+                time=repeat_time,
+                type=HitObjectType.SLIDER,
+                hit_sound=self.hit_sound,
+                approach_time=self.approaching_circle.appear,
+                is_reverse=is_reverse,
+                edge_index=i,
+                extras=self.extras
+            )
+            self.repeat_points.append(repeat_point)
+            
+        return total_duration
