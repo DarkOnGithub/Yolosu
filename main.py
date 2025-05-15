@@ -88,7 +88,6 @@ def profile_entire_code():
     except KeyboardInterrupt:
         profiler.disable()  # Ensure profiling stops
         print("\nCaught KeyboardInterrupt, printing profiling stats...")
-    
     # Process and print stats
     stream = io.StringIO()
     stats = pstats.Stats(profiler, stream=stream).sort_stats(SortKey.CUMULATIVE)
@@ -99,8 +98,7 @@ def profile_entire_code():
     
     return stream.getvalue()
 if __name__ == "__main__":
-    output = profile_entire_code()
-    print(output)
+    main()
 # beatmap = beatmap_parser.extract_beatmap("The Violation", False)
 # beatmap.parse_difficulties(None)
 # diff = beatmap.get_difficulty(-1)

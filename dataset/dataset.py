@@ -16,6 +16,7 @@ import cv2
 from tqdm import tqdm
 import logging
 import traceback
+import time
 
 class Dataset:
     """
@@ -70,7 +71,7 @@ class Dataset:
         
         total_frames = sum(loader.index_content['total_frames'] for loader in self.dataset_loaders.values())
         
-        with tqdm(total=total_frames, desc="Processing frames") as pbar:
+        with tqdm(total=total_frames, desc="Building combined index") as pbar:
             for loader in self.dataset_loaders.values():
                 for frame_idx in range(loader.index_content['total_frames']):
                     objects = loader.get_objects_at_frame(frame_idx)
@@ -87,7 +88,7 @@ class Dataset:
             random.shuffle(empty_frames)
             self.combined_index.extend(empty_frames[:num_empty_frames])
         
-        logging.info("Shuffling combined index...")
+        logging.info("Shuffling dataset...")
         random.shuffle(self.combined_index)
 
     def get_balanced_batch(self) -> List[Tuple[np.ndarray, Dict[str, List[Tuple[float, float, float, float]]]]]:
@@ -182,18 +183,9 @@ class Dataset:
                     try:
                         logging.info(f"Creating dataset for {beatmap_file} - {difficulty.difficulty_name}")
                         
-
-                        writer = DatasetWriter(
-                            beatmap=beatmap,
-                            difficulty=difficulty,
-                            dataset_path=output_folder,
-                            config=config
-                        )
-                        
                         player = Player(beatmap=beatmap, difficulty=difficulty, config=config)
                         player.play(visualize=False)
                         
-                        writer.save()
                         
                     except Exception as e:
                         logging.error(f"Error processing difficulty {difficulty.difficulty_name} in {beatmap_file}: {str(e)}")
@@ -204,7 +196,7 @@ class Dataset:
                 logging.error(f"Error processing beatmap {beatmap_file}: {str(e)}")
                 logging.error(traceback.format_exc())
                 continue
-        
+
         return cls(output_folder, config, object_counts)
 
     def export_yolo(self, output_folder: str, split_ratio: float = 0.8):
@@ -223,7 +215,7 @@ class Dataset:
         os.makedirs(os.path.join(output_folder, 'labels', 'val'), exist_ok=True)
         
         
-        class_names = ['circle', 'slider', 'spinner', 'approaching_circle']
+        class_names = ['circle', 'slider', 'spinner', 'approaching_circle',"ball", "repeat_point"]
         with open(os.path.join(output_folder, 'classes.txt'), 'w') as f:
             f.write('\n'.join(class_names))
         
@@ -303,12 +295,6 @@ names: {class_names}
                                  class_colors: Dict[str, Tuple[int, int, int]] = None):
         """
         Create a video visualization of a YOLO dataset with colored bounding boxes.
-        
-        Args:
-            yolo_dataset_path: Path to the YOLO dataset folder (should contain images/ and labels/ subfolders)
-            output_path: Path to save the output video
-            fps: Frames per second for the output video
-            class_colors: Dictionary mapping class names to BGR colors. If None, default colors will be used.
         """
         
         classes_file = os.path.join(yolo_dataset_path, 'classes.txt')

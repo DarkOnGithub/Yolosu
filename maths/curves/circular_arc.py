@@ -13,10 +13,9 @@ class CircularArc:
             self.unstable = True
             
         d = 2 * (pt1[0] * (pt2[1] - pt3[1]) + pt2[0] * (pt3[1] - pt1[1]) + pt3[0] * (pt1[1] - pt2[1]))
-        if abs(d) < 1e-6:  # Check for near-zero denominator
+        if abs(d) < 1e-6:  
             self.unstable = True
-            self.centre = np.array([0.0, 0.0])  # Default center for unstable case
-            self.r = 0.0
+            self.centre = np.array([0.0, 0.0])  
             self.start_angle = 0.0
             self.total_angle = 0.0
             return

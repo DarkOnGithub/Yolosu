@@ -15,37 +15,43 @@ from utils.utils import osu_pixels_to_normal_coords
 from maths.curves.curve import CurveType
 from .config import DanserConfig
 from .beatmap import Beatmap
-from dataset.dataset_writer import DatasetWriter
+from dataset.dataset_writer import DatasetWriter, write_frame
 from .objects.approaching_circle import ApproachCircle
 from .objects.repeat_point import RepeatPoint
+from .objects.slider import SliderBall
 import multiprocessing as mp
 from multiprocessing import Pool, cpu_count, Manager
 from functools import partial
 
-# Global variables for worker initialization
 _g_video_path: str
 _g_fps: float
 _g_start_time: int
-_g_hit_objects: List  # List[HitObject]
+_g_hit_objects: List  
 _g_approach_time: float
 _g_radius: float
 _g_resolution: Tuple[int, int]
 _g_slider_multiplier: float
-_g_timing_points: List  # List of timing point tuples
+_g_timing_points: List 
 _g_dataset_writer = None
 _g_shared_data = None
 _g_shared_index = None
+_g_result_queue = None
+_g_config = None
+_g_difficulty = None
+_g_frame_counter = None
+_g_index_lock = None
 
 def init_worker(video_path: str, fps: float, start_time: int,
                 hit_objects: List, approach_time: float,
                 radius: float, resolution: Tuple[int, int],
                 slider_multiplier: float, timing_points: List,
-                dataset_dir: str, config, beatmap, difficulty):
+                dataset_dir: str, config, beatmap, difficulty, result_queue, frame_counter, index_lock):
     """Initialize globals for each worker process"""
     global _g_video_path, _g_fps, _g_start_time, _g_hit_objects
     global _g_approach_time, _g_radius, _g_resolution
     global _g_slider_multiplier, _g_timing_points, _g_dataset_writer
     global _g_shared_data, _g_shared_index
+    global _g_result_queue, _g_config, _g_difficulty, _g_frame_counter, _g_index_lock
 
     _g_video_path = video_path
     _g_fps = fps
@@ -58,10 +64,14 @@ def init_worker(video_path: str, fps: float, start_time: int,
     _g_timing_points = timing_points
 
 
-    from dataset.dataset_writer import DatasetWriter
-    # Create writer with shared data structures
-    _g_dataset_writer = DatasetWriter(dataset_path=dataset_dir, config=config,
-                                     beatmap=beatmap, difficulty=difficulty)
+    frame_counter.value = 0
+    index_lock = mp.Lock()
+
+    _g_result_queue = result_queue
+    _g_config = config
+    _g_difficulty = difficulty
+    _g_frame_counter = frame_counter
+    _g_index_lock = index_lock
 
 def is_visible(obj, current_time: int, frame_end_time: int) -> bool:
     """Helper function to determine if an object should be visible"""
@@ -123,21 +133,61 @@ def process_frame_range(frame_range: Tuple[int, int]):
 
         visible_objects = []
         for obj in _g_hit_objects:
-            if is_visible(obj, current_time, frame_end_time):
+            visibility_start = obj.time - _g_approach_time
+            hit_end_time = obj.time
+            
+            if isinstance(obj, Slider):
+                hit_end_time = obj.time + obj.calculate_duration(
+                    _g_slider_multiplier,
+                    _g_timing_points
+                )
+                
+                for repeat_point in obj.repeat_points:
+                    repeat_visibility_start = repeat_point.time - _g_approach_time
+                    repeat_min_visibility_time = repeat_visibility_start + (_g_approach_time * 0.3)
+                    
+                    if (repeat_min_visibility_time <= frame_end_time and
+                        repeat_point.time >= current_time):
+                        visible_objects.append(repeat_point)
+                visible_objects.append(obj.ball)
+                        
+            elif isinstance(obj, Spinner):
+                hit_end_time = obj.end_time
+                
+            if isinstance(obj, (HitCircle, Slider)):
+                min_approach_time = obj.approaching_circle.appear + (_g_approach_time * 0.3)
+                if (min_approach_time <= frame_end_time and 
+                    obj.approaching_circle.time >= current_time):
+                    approaching_circle = obj.approaching_circle
+                    visible_objects.append(approaching_circle)
+            
+            min_visibility_time = visibility_start + (_g_approach_time * 0.3)
+            
+            if (min_visibility_time <= frame_end_time and
+                hit_end_time >= current_time):
                 visible_objects.append(obj)
+                
             if (obj.time - _g_approach_time) > frame_end_time:
                 break
 
         update_slider_positions(visible_objects, current_time)
-
-        _g_dataset_writer.write_frame(frame, visible_objects, current_time)
-
+        write_frame(
+            frame=frame,
+            visible_objects=visible_objects,
+            current_time=current_time,
+            result_queue=_g_result_queue,
+            config=_g_config,
+            difficulty=_g_difficulty,
+            frame_counter=_g_frame_counter,
+            index_lock=_g_index_lock
+        )
     cap.release()
 
 class Player:
     def __init__(self, beatmap: Beatmap, difficulty: Difficulty, config: Optional[DanserConfig] = None):
         self.difficulty = difficulty
         self.beatmap = beatmap
+        
         self.hit_objects = sorted(difficulty.hit_objects.objects, key=lambda x: x.time)
         
         if config is None:
@@ -173,7 +223,18 @@ class Player:
         if start_time <= 0.01:
             start_time = -min(1800, self.approach_time)
         self.start_time = start_time - 1000
-        self.dataset_writer = DatasetWriter(self.beatmap, self.difficulty, self.config.dataset_dir, self.config)
+
+        self.frame_counter = mp.Value('i', 0)
+        self.index_lock = mp.Lock()
+        
+        self.dataset_writer = DatasetWriter(
+            self.beatmap, 
+            self.difficulty, 
+            self.config.dataset_dir, 
+            self.config
+        )
+        self.result_queue = self.dataset_writer.result_queue
+        
         self.num_processes = cpu_count()
         self.slider_multiplier = difficulty.difficulty.slider_multiplier
         self.timing_points = tuple((tp.time, tp.beat_length, tp.uninherited) 
@@ -274,7 +335,7 @@ class Player:
                     if (repeat_min_visibility_time <= frame_end_time and
                         repeat_point.time >= current_time):
                         visible_objects.append(repeat_point)
-                        
+
             elif isinstance(obj, Spinner):
                 hit_end_time = obj.end_time
                 
@@ -425,15 +486,23 @@ class Player:
             self.config.dataset_dir,
             self.config,
             self.beatmap,
-            self.difficulty
+            self.difficulty,
+            self.result_queue,
+            self.frame_counter,
+            self.index_lock
         )
-        
         with Pool(processes=self.num_processes, initializer=init_worker, initargs=initargs) as pool:
             for _ in tqdm(pool.imap_unordered(process_frame_range, frame_ranges), 
                          total=len(frame_ranges), desc="Processing frames"):
                 pass
         
         self.cap.release()
+        
+        while not self.result_queue.empty():
+            result = self.result_queue.get()
+            if result is None:
+                break
+            self.dataset_writer._process_queue_worker()
 
     def play(self, visualize: bool = False):
         """Play the video with bounding boxes and player controls.
@@ -442,6 +511,8 @@ class Player:
             self._play_visualization()
         else:
             self._play_processing()
+            
+        self.dataset_writer.save()
 
     def _play_visualization(self):
         """Handle visualization mode with interactive controls"""
