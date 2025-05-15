@@ -66,7 +66,6 @@ class Player:
         
         beatmap_name = self.beatmap.title
         output_name = f"{beatmap_name}_{self.difficulty.difficulty_name}.mp4"
-        print(output_name)
         output_path = os.path.join(self.config.output_dir, output_name)
         
         if os.path.exists(output_path):
@@ -169,7 +168,7 @@ class Player:
              
         return visible_objects
     
-    def draw_bounding_box(self, frame: np.ndarray, obj: HitObject, alpha: float = 0.5, current_time: float = 0):
+    def draw_bounding_box(self, frame: np.ndarray, obj: HitObject, alpha: float = 0.9, current_time: float = 0):
         """Draw a bounding box for a hit object on the frame"""
         if isinstance(obj, ApproachCircle):
             x1, y1, x2, y2 = obj.get_bounding_box(self.radius, current_time)
@@ -197,10 +196,10 @@ class Player:
                 label += " Catmull"
                 color = (255, 255, 0)
 
-            for c_point in obj._path_points:
-                cx, cy = osu_pixels_to_normal_coords(c_point[0], c_point[1], self.resolution_width, self.resolution_height)
-                cx, cy = int(cx), int(cy)
-                cv2.circle(overlay, (cx, cy), 10, (128, 128, 0), -1)  
+            # for c_point in obj.multi_curve.c_points1:
+            #     cx, cy = osu_pixels_to_normal_coords(c_point[0], c_point[1], self.resolution_width, self.resolution_height)
+            #     cx, cy = int(cx), int(cy)
+            #     cv2.circle(overlay, (cx, cy), 10, (0, 0, 0), -1)  
             control_points = [(obj.x, obj.y)] + obj.control_points
             for i, (cx, cy) in enumerate(control_points):
                 cx, cy = osu_pixels_to_normal_coords(cx, cy, self.resolution_width, self.resolution_height)
@@ -255,9 +254,9 @@ class Player:
         cv2.addWeighted(overlay, alpha, frame, 1-alpha, 0, frame)
         
     
-    def draw_frame_info(self, frame, playback_speed: float, current_frame: int):
+    def draw_frame_info(self, frame, playback_speed: float, current_frame: int, current_time: int):
         """Draw playback information on the frame."""
-        info_text = f"Speed: {playback_speed:.1f}x | Frame: {current_frame}"
+        info_text = f"Speed: {playback_speed:.1f}x | Frame: {current_frame} | Time: {current_time}"
         cv2.putText(frame, info_text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
 
     def visualize_frame(self, frame, current_time: int):
@@ -301,7 +300,6 @@ class Player:
         cv2.resizeWindow('Osu! Gameplay', 1920, 1080)
         
         def update_sliders(current_time: int, visible_objects: List[HitObject]):
-            current_time -= int(16.67)
             for obj in visible_objects:
                 if isinstance(obj, Slider) and obj.ball and current_time >= obj.time:
                     duration = obj.calculate_duration(
@@ -318,10 +316,10 @@ class Player:
                 
                 current_time = self.start_time + int(self.cap.get(cv2.CAP_PROP_POS_FRAMES) * 1000 / self.fps)
                 visible_objects = self.get_current_objects(current_time)
-                update_sliders(current_time, visible_objects)
+                update_sliders(current_time - 16, visible_objects)
                 
                 if visualize:
-                    self.draw_frame_info(frame, playback_speed, current_frame)
+                    self.draw_frame_info(frame, playback_speed, current_frame, current_time)
                     self.visualize_frame(frame, current_time)
                     cv2.imshow('Osu! Gameplay', frame)
                 else:
@@ -340,8 +338,7 @@ class Player:
                     break
                 
                 if paused and (key == ord('f') or key == ord('b')):
-                    frame_time = int(current_frame * 1000 / self.fps)
-                    current_time = self.start_time + frame_time
+                    current_time = self.start_time + int(self.cap.get(cv2.CAP_PROP_POS_FRAMES) * 1000 / self.fps)
                     visible_objects = self.get_current_objects(current_time)
                     update_sliders(current_time, visible_objects)
                     
@@ -349,7 +346,7 @@ class Player:
                     ret, frame = self.cap.read()
                     if ret:
                         self.visualize_frame(frame, current_time)
-                        self.draw_frame_info(frame, playback_speed, current_frame)
+                        self.draw_frame_info(frame, playback_speed, current_frame, current_time)
                         cv2.imshow('Osu! Gameplay', frame)
             else:
                 if current_frame >= self.frame_count:

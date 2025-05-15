@@ -41,7 +41,7 @@ class Slider(HitObject):
                  edge_additions: List[Tuple[int, int]] = None,
                  extras: Optional[Tuple[int, int, int, int]] = None):
         super().__init__(x, y, time, type, hit_sound, extras)
-        
+
         self.approaching_circle = ApproachCircle(x, y, time, approach_time)
         self.curve_type = curve_type
         self.control_points = control_points or []
@@ -86,7 +86,6 @@ class Slider(HitObject):
         x_coords = [p[0] for p in path_points]
         y_coords = [p[1] for p in path_points]
         
-        # Include repeat points in bounding box
         for repeat_point in self.repeat_points:
             x_coords.append(repeat_point.x)
             y_coords.append(repeat_point.y)
@@ -102,19 +101,17 @@ class Slider(HitObject):
         """Calculate the points along the slider path"""
         if not self.control_points:
             return [(self.x, self.y)]
-            
-        # Create curve definition
+
         curve_def = CurveDef(
             curve_type=self.curve_type,
             points=[(self.x, self.y)] + self.control_points
         )
         
-        # Create multi-curve
         multi_curve = MultiCurve([curve_def])
-        
+        self.multi_curve = multi_curve
         points = []
         for i in range(num_points):
-            t = i / (num_points - 1)
+            t = i / (num_points - 1)            
             point = multi_curve.point_at(t)
             points.append(point)
         self._path_points = points
@@ -122,58 +119,24 @@ class Slider(HitObject):
 
     def update_ball_position(self, current_time: int, duration: float):
         """Update the slider ball position based on current time"""
-        if not self.ball:
-            return
-            
-        # Calculate which slide we're on and progress within that slide
-        slide_duration = duration / self.slides
-        current_slide = min(int((current_time - self.time) / slide_duration), self.slides - 1)
-        slide_progress = ((current_time - self.time) % slide_duration) / slide_duration
-        
-        # Get path points
-        path_points = self.calculate_path_points(2000)
-        
-        # For odd-numbered slides (1, 3, etc.), we need to reverse the path
-        if current_slide % 2 == 1:
-            slide_progress = 1.0 - slide_progress
-            path_points = path_points[::-1]
-            
-        # Calculate position along the path
-        point_index = slide_progress * (len(path_points) - 1)
-        index1 = int(point_index)
-        index2 = min(index1 + 1, len(path_points) - 1)
-        t = point_index - index1
-        
-        # Use cubic interpolation for smoother movement
-        if index1 > 0 and index2 < len(path_points) - 1:
-            p0 = path_points[index1 - 1]
-            p1 = path_points[index1]
-            p2 = path_points[index2]
-            p3 = path_points[index2 + 1]
-            
-            # Cubic interpolation
-            t2 = t * t
-            t3 = t2 * t
-            
-            x = (-0.5 * p0[0] + 1.5 * p1[0] - 1.5 * p2[0] + 0.5 * p3[0]) * t3 + \
-                (p0[0] - 2.5 * p1[0] + 2 * p2[0] - 0.5 * p3[0]) * t2 + \
-                (-0.5 * p0[0] + 0.5 * p2[0]) * t + \
-                p1[0]
-                
-            y = (-0.5 * p0[1] + 1.5 * p1[1] - 1.5 * p2[1] + 0.5 * p3[1]) * t3 + \
-                (p0[1] - 2.5 * p1[1] + 2 * p2[1] - 0.5 * p3[1]) * t2 + \
-                (-0.5 * p0[1] + 0.5 * p2[1]) * t + \
-                p1[1]
+        print(self.time)
+        if current_time < self.time:
+            x, y = self.x, self.y
+        elif current_time > self.time + duration:
+            path_points = self.calculate_path_points()
+            x, y = path_points[-1]
         else:
-            # Fallback to linear interpolation at the edges
-            p1 = path_points[index1]
-            p2 = path_points[index2]
-            x = p1[0] + t * (p2[0] - p1[0])
-            y = p1[1] + t * (p2[1] - p1[1])
-        
-        # Update ball position
+            progress = (current_time - self.time) / duration
+            if int(progress) % 2 == 1:
+                progress = 1 - (progress % 1)
+            else:
+                progress = progress % 1
+                
+            path_points = self.calculate_path_points()
+            point_index = int(progress * (len(path_points) - 1))
+            x, y = path_points[point_index]
+            
         self.ball.update_position(float(x), float(y), current_time)
-        
         
     @classmethod
     def from_line(cls, line: str) -> 'Slider':
@@ -241,32 +204,26 @@ class Slider(HitObject):
 
     def calculate_duration(self, slider_multiplier: float, timing_points) -> int:
         """Calculate the total duration of the slider in milliseconds"""
-        print(slider_multiplier)
         slider_velocity = 1.0
         beat_length = 1000.0
-        
         for timing_point in timing_points:
             if timing_point.time <= self.time:
                 if timing_point.uninherited:
                     beat_length = timing_point.beat_length
                 else:
                     slider_velocity = -100 / timing_point.beat_length
-        
         slide_duration = (self.length / (slider_multiplier * 100 * slider_velocity)) * beat_length
         total_duration = int(slide_duration * self.slides)
-        
-        # Create repeat points - only for actual repeats (not including start point)
         self.repeat_points = []
-        for i in range(1, self.slides):  # Changed from self.slides + 1 to self.slides
+        for i in range(1, self.slides):
             repeat_time = self.time + int(slide_duration * i)
             is_reverse = i % 2 == 1
             
-            # Calculate position at repeat point
             path_points = self.calculate_path_points()
             if is_reverse:
-                pos = path_points[0]  # Start position for reverse
+                pos = path_points[0]
             else:
-                pos = path_points[-1]  # End position for forward
+                pos = path_points[-1]
                 
             repeat_point = RepeatPoint(
                 x=int(pos[0]),

@@ -169,7 +169,6 @@ class Dataset:
             try:
                 beatmap_path = os.path.join(beatmaps_folder, beatmap_file)
                 beatmap = beatmap_parser.extract_beatmap(beatmap_path, is_full_path=True)
-                print(beatmap.difficulties, beatmap.title, beatmap.folder_path)
                 available_difficulties = beatmap.difficulties   
                 if not available_difficulties:
                     logging.warning(f"Warning: No difficulties found in {beatmap_file}")

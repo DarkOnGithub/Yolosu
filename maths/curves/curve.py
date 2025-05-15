@@ -27,7 +27,7 @@ def process_bezier(points: List[Tuple[float, float]]) -> List[Tuple[float, float
 
             if multi:
                 i += 1
-            last_index = i + 1
+            last_index = i 
 
     return out_points
 
@@ -120,6 +120,7 @@ class MultiCurve:
 
         for curve_def in curve_defs:
             c_points1 = self._process_curve(curve_def, False)
+            self.c_points1 = c_points1
             c_points2 = c_points1 if curve_def.curve_type != CurveType.CIRCULAR_ARC else self._process_curve(curve_def, True)
         
             n_lines = [None] * max(0, len(self.lines) + len(c_points1) - 1)
