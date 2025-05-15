@@ -216,15 +216,15 @@ class Slider(HitObject):
         slider_velocity = 1.0
         beat_length = 1000.0
         for timing_point in timing_points:
-            time, beat_length, uninherited = timing_point
-            if time <= self.time:
-                if uninherited:
-                    beat_length = beat_length
+            _time, _beat_length, _uninherited = timing_point
+            if _time <= self.time:
+                if _uninherited:
+                    beat_length = _beat_length
                 else:
-                    slider_velocity = -100 / beat_length
+                    slider_velocity = -100 / _beat_length
+
         slide_duration = (self.length / (slider_multiplier * 100 * slider_velocity)) * beat_length
         total_duration = int(slide_duration * self.slides)
-        
         self.repeat_points = []
         for i in range(1, self.slides):
             repeat_time = self.time + int(slide_duration * i)

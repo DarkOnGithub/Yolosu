@@ -28,7 +28,6 @@ class DatasetLoader:
     def load_data(self):
         """Lazily load the data file when needed."""
         if self.data_content is None:
-            print("loading data from", self.data_path)
             with open(self.data_path, 'r') as f:
                 self.data_content = json.loads(f.read())
 

@@ -65,9 +65,10 @@ class Dataset:
         return not any(obj_type in self.target_counts and boxes for obj_type, boxes in objects.items())
 
     def _build_combined_index(self):
-        """Build a combined index of all frames from all datasets, including empty frames."""
+        """Build a combined index of all frames from all datasets, avoiding duplicates."""
         self.combined_index = []
         empty_frames = []
+        added_frames = set()
         
         total_frames = sum(loader.index_content['total_frames'] for loader in self.dataset_loaders.values())
         
@@ -75,10 +76,16 @@ class Dataset:
             for loader in self.dataset_loaders.values():
                 for frame_idx in range(loader.index_content['total_frames']):
                     objects = loader.get_objects_at_frame(frame_idx)
+                    frame_key = f"{loader.index_path}_{frame_idx}"
+                    
+                    if frame_key in added_frames:
+                        continue
+                        
                     if self._is_empty_frame(objects):
                         empty_frames.append((loader, frame_idx))
                     else:
                         self.combined_index.append((loader, frame_idx))
+                        added_frames.add(frame_key)
                     pbar.update(1)
         
         total_frames = len(self.combined_index) + len(empty_frames)
@@ -86,21 +93,24 @@ class Dataset:
         
         if empty_frames:
             random.shuffle(empty_frames)
-            self.combined_index.extend(empty_frames[:num_empty_frames])
+            for loader, frame_idx in empty_frames[:num_empty_frames]:
+                frame_key = f"{loader.index_path}_{frame_idx}"
+                if frame_key not in added_frames:
+                    self.combined_index.append((loader, frame_idx))
+                    added_frames.add(frame_key)
         
         logging.info("Shuffling dataset...")
         random.shuffle(self.combined_index)
+        logging.info(f"Total unique frames: {len(added_frames)}")
 
     def get_balanced_batch(self) -> List[Tuple[np.ndarray, Dict[str, List[Tuple[float, float, float, float]]]]]:
         """
         Get frames until target object counts are reached using the combined index.
-        
-        Returns:
-            List of (frame, objects) tuples
         """
         batch = []
         max_attempts = len(self.combined_index)
         attempts = 0
+        used_frames = set()
         
         while attempts < max_attempts:
             attempts += 1
@@ -118,6 +128,11 @@ class Dataset:
                 break
                 
             loader, frame_idx = self.combined_index[attempts - 1]
+            
+            frame_key = f"{loader.index_path}_{frame_idx}"
+            if frame_key in used_frames:
+                continue
+                
             objects = loader.get_objects_at_frame(frame_idx)
             should_use = False
 
@@ -128,12 +143,12 @@ class Dataset:
                     if remaining > 0:
                         should_use = True
                         self.object_counts[obj_type] += len(boxes)
-                        break
 
             if should_use:
                 frame = loader.get_frame(frame_idx)
                 if frame is not None:
                     batch.append((frame, objects))
+                    used_frames.add(frame_key)
         
         return batch
     

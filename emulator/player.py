@@ -141,7 +141,6 @@ def process_frame_range(frame_range: Tuple[int, int]):
                     _g_slider_multiplier,
                     _g_timing_points
                 )
-                
                 for repeat_point in obj.repeat_points:
                     repeat_visibility_start = repeat_point.time - _g_approach_time
                     repeat_min_visibility_time = repeat_visibility_start + (_g_approach_time * 0.3)
@@ -149,7 +148,6 @@ def process_frame_range(frame_range: Tuple[int, int]):
                     if (repeat_min_visibility_time <= frame_end_time and
                         repeat_point.time >= current_time):
                         visible_objects.append(repeat_point)
-                visible_objects.append(obj.ball)
                         
             elif isinstance(obj, Spinner):
                 hit_end_time = obj.end_time
@@ -166,7 +164,9 @@ def process_frame_range(frame_range: Tuple[int, int]):
             if (min_visibility_time <= frame_end_time and
                 hit_end_time >= current_time):
                 visible_objects.append(obj)
-                
+                if isinstance(obj, Slider) and obj.ball and current_time >= obj.time:
+                    visible_objects.append(obj.ball)
+
             if (obj.time - _g_approach_time) > frame_end_time:
                 break
 
@@ -303,12 +303,33 @@ class Player:
 
         try:
             logging.info(f"Generating video with command: {command}")
-            out = subprocess.run(command, shell=True, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
-            if out.returncode == 0:
+            process = subprocess.Popen(
+                command,
+                shell=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                universal_newlines=True,
+                bufsize=1
+            )
+
+            with tqdm(total=100, desc="Generating video") as pbar:
+                last_progress = 0
+                for line in process.stdout:
+                    if "Progress:" in line:
+                        try:
+                            progress = int(line.split("Progress:")[1].split("%")[0].strip())
+                            if progress > last_progress:
+                                pbar.update(progress - last_progress)
+                                last_progress = progress
+                        except (ValueError, IndexError):
+                            continue
+
+            process.wait()
+            if process.returncode == 0:
                 logging.info(f"Video generated successfully: {output_path}")
                 return output_path
             else:
-                raise RuntimeError(f"Failed to generate video using danser: {out.returncode}")
+                raise RuntimeError(f"Failed to generate video using danser: {process.returncode}")
         except subprocess.CalledProcessError as e:
             logging.error(f"Failed to generate video: {e}")
             raise RuntimeError(f"Failed to generate video using danser: {e}")
@@ -325,9 +346,8 @@ class Player:
             if isinstance(obj, Slider):
                 hit_end_time = obj.time + obj.calculate_duration(
                     self.difficulty.difficulty.slider_multiplier,
-                    self.difficulty.timing_points.points
+                    self.timing_points
                 )
-                
                 for repeat_point in obj.repeat_points:
                     repeat_visibility_start = repeat_point.time - self.approach_time
                     repeat_min_visibility_time = repeat_visibility_start + (self.approach_time * 0.3)
@@ -568,7 +588,7 @@ class Player:
             if isinstance(obj, Slider) and obj.ball and current_time >= obj.time:
                 duration = obj.calculate_duration(
                     self.difficulty.difficulty.slider_multiplier,
-                    self.difficulty.timing_points.points
+                    self.timing_points
                 )
                 obj.update_ball_position(current_time, duration)
 

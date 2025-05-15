@@ -45,20 +45,20 @@ config = DanserConfig(
     skin="Aristia(Edit)+trail"
 )
 
-def main():
+def _main():
     from dataset.dataset import Dataset
 
     dataset = Dataset.create_from_beatmaps(
         beatmaps_folder="./beatmaps", 
         output_folder="./dataset_yolo", 
         config=config, 
-        num_beatmaps=1, 
-        difficulties_per_beatmap=1, 
-        visualize=True,
+        num_beatmaps=10, 
+        difficulties_per_beatmap=3, 
+        visualize=False,
         object_counts={
             'circle': 5000,
-            'slider': 2000,
-            'spinner': 500,
+            'slider': 5000,
+            'spinner': 2500,
             'approaching_circle': 5000,
             'ball': 5000,
             'repeat_point': 5000
@@ -68,35 +68,15 @@ def main():
 
 
     Dataset.create_visualization_video(
-        yolo_dataset_path="./dataset_yolo_test_export",
-        output_path="./dataset_yolo_test_export/visualization.mp4",
+        yolo_dataset_path="./dataset_yolo_export",
+        output_path="./dataset_yolo_export/visualization.mp4",
         fps=1
     )
     
-    
-import cProfile
-import io
-import pstats
-from pstats import SortKey
-def profile_entire_code():
-    profiler = cProfile.Profile()
-    try:
-        # Run the main function under profiling
-        profiler.enable()
-        main()  # Replace with your main function or script logic
-        profiler.disable()
-    except KeyboardInterrupt:
-        profiler.disable()  # Ensure profiling stops
-        print("\nCaught KeyboardInterrupt, printing profiling stats...")
-    # Process and print stats
-    stream = io.StringIO()
-    stats = pstats.Stats(profiler, stream=stream).sort_stats(SortKey.CUMULATIVE)
-    stats.print_stats()  # Show all results
-    
-    # Optionally save the profile data
-    profiler.dump_stats('profile_data.prof')
-    
-    return stream.getvalue()
+def main():
+    from model.reinforcement_learning.game_state import GameState
+    state = GameState()
+
 if __name__ == "__main__":
     main()
 # beatmap = beatmap_parser.extract_beatmap("The Violation", False)
