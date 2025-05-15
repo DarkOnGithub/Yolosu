@@ -14,8 +14,6 @@ class RepeatPoint(HitObject):
         self.approaching_circle = ApproachCircle(x, y, time, approach_time)
         self.is_reverse = is_reverse
         self.edge_index = edge_index
-        self._fade = 1.0
-        self._scale = 1.0
         
     def get_bounding_box(self, radius: float) -> Tuple[float, float, float, float]:
         """Get the bounding box of the repeat point (x1, y1, x2, y2)"""
@@ -25,15 +23,6 @@ class RepeatPoint(HitObject):
             self.x + radius,
             self.y + radius
         )
-        
-
-    def get_fade(self) -> float:
-        """Get the current fade value (0.0 to 1.0)"""
-        return self._fade
-        
-    def get_scale(self) -> float:
-        """Get the current scale value"""
-        return self._scale
         
     def __repr__(self) -> str:
         return f"RepeatPoint(x={self.x}, y={self.y}, time={self.time}, is_reverse={self.is_reverse}, edge_index={self.edge_index})" 

@@ -1,51 +1,38 @@
 import math
-from typing import List, Tuple
 import numpy as np
 
 class Bezier:
-    def __init__(self, points: List[Tuple[float, float]]):
+    def __init__(self, points: np.ndarray):
         self.points = points
         self.control_length = 0.0
         self.approx_length = 0.0
         
-        # Calculate control length
-        for i in range(1, len(self.points)):
-            self.control_length += math.sqrt(
-                (self.points[i][0] - self.points[i-1][0])**2 + 
-                (self.points[i][1] - self.points[i-1][1])**2
-            )
+        diffs = np.diff(self.points, axis=0)
+        self.control_length = np.sum(np.sqrt(np.sum(diffs**2, axis=1)))
         
         self.approx_length = self.control_length
         self.calculate_length()
 
     def calculate_length(self):
         """Calculates the approximate length of the curve to 2 decimal points of accuracy in most cases"""
-        length = 0.0
         sections = math.ceil(self.control_length)
         
-        previous = self.points[0]
-        for i in range(1, int(sections) + 1):
-            current = self.point_at(i / sections)
-            length += math.sqrt(
-                (current[0] - previous[0])**2 + 
-                (current[1] - previous[1])**2
-            )
-            previous = current
-            
-        self.approx_length = length
+        t = np.linspace(0, 1, sections + 1)
+        points = np.array([self.point_at(ti) for ti in t])
+        
+        diffs = np.diff(points, axis=0)
+        self.approx_length = np.sum(np.sqrt(np.sum(diffs**2, axis=1)))
 
-    def point_at(self, t: float) -> Tuple[float, float]:
+    def point_at(self, t: float) -> np.ndarray:
         """Calculate point on Bezier curve at parameter t using Bernstein polynomials"""
         n = len(self.points) - 1
-        x = 0.0
-        y = 0.0
+        point = np.zeros(2)
         
         for i in range(n + 1):
             b = self._bernstein(i, n, t)
-            x += self.points[i][0] * b
-            y += self.points[i][1] * b
+            point += self.points[i] * b
             
-        return (x, y)
+        return point
 
     def get_length(self) -> float:
         return self.approx_length

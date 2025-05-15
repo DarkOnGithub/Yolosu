@@ -4,6 +4,7 @@ from maths.curves.curve import CurveType, MultiCurve, CurveDef
 from .approaching_circle import ApproachCircle
 from .repeat_point import RepeatPoint
 import math
+from functools import lru_cache
 
 class SliderBall:
     """Represents the slider ball that follows the slider path"""
@@ -30,8 +31,8 @@ class SliderBall:
 
 class Slider(HitObject):
     """Represents a slider in osu!"""
-    MAX_PATH_LENGTH = 100_000_000  # Sanity limits
-    MAX_REPEATS = 10_000  # Same limit as osu!
+    MAX_PATH_LENGTH = 100_000_000
+    MAX_REPEATS = 10_000  
 
     def __init__(self, x: int, y: int, time: int, type: HitObjectType, 
                  hit_sound: int, approach_time: float, curve_type: str = "L",
@@ -53,6 +54,8 @@ class Slider(HitObject):
         self._validate()
         self.ball = SliderBall(x=self.x, y=self.y, time=self.time)
         self.repeat_points = []
+        self._duration = None
+        self._multi_curve = None
         
         if self.curve_type == "P":            
             if len(self.control_points) < 2:
@@ -97,43 +100,45 @@ class Slider(HitObject):
             max(y_coords) + radius   
         )
         
-    def calculate_path_points(self, num_points: int = 2000) -> List[Tuple[float, float]]:
-        """Calculate the points along the slider path"""
+    @lru_cache(maxsize=1)
+    def calculate_path_points(self, num_points: int = 500) -> List[Tuple[float, float]]:
+        """Calculate the points along the slider path with caching"""
         if not self.control_points:
             return [(self.x, self.y)]
 
-        curve_def = CurveDef(
-            curve_type=self.curve_type,
-            points=[(self.x, self.y)] + self.control_points
-        )
-        
-        multi_curve = MultiCurve([curve_def])
-        self.multi_curve = multi_curve
+        if self._multi_curve is None:
+            curve_def = CurveDef(
+                curve_type=self.curve_type,
+                points=[(self.x, self.y)] + self.control_points
+            )
+            self._multi_curve = MultiCurve([curve_def], self.length)
+            
         points = []
         for i in range(num_points):
             t = i / (num_points - 1)            
-            point = multi_curve.point_at(t)
-            points.append(point)
-        self._path_points = points
+            point = self._multi_curve.point_at(t)
+            points.append((float(point[0]), float(point[1])))
         return points
 
     def update_ball_position(self, current_time: int, duration: float):
         """Update the slider ball position based on current time"""
-        print(self.time)
         if current_time < self.time:
             x, y = self.x, self.y
         elif current_time > self.time + duration:
             path_points = self.calculate_path_points()
             x, y = path_points[-1]
         else:
-            progress = (current_time - self.time) / duration
-            if int(progress) % 2 == 1:
-                progress = 1 - (progress % 1)
-            else:
-                progress = progress % 1
-                
             path_points = self.calculate_path_points()
-            point_index = int(progress * (len(path_points) - 1))
+            total_slides = self.slides
+            slide_duration = duration / total_slides
+            current_slide = int((current_time - self.time) / slide_duration)
+            slide_progress = ((current_time - self.time) % slide_duration) / slide_duration
+            
+            is_reverse = current_slide % 2 == 1
+            if is_reverse:
+                slide_progress = 1 - slide_progress
+                
+            point_index = int(slide_progress * (len(path_points) - 1))
             x, y = path_points[point_index]
             
         self.ball.update_position(float(x), float(y), current_time)
@@ -202,22 +207,28 @@ class Slider(HitObject):
     def __repr__(self) -> str:
         return f"Slider(x={self.x}, y={self.y}, time={self.time}, curve_type={self.curve_type}, slides={self.slides}, length={self.length})"
 
+    @lru_cache(maxsize=1)
     def calculate_duration(self, slider_multiplier: float, timing_points) -> int:
-        """Calculate the total duration of the slider in milliseconds"""
+        """Calculate the total duration of the slider in milliseconds with caching"""
+        if self._duration is not None:
+            return self._duration
+
         slider_velocity = 1.0
         beat_length = 1000.0
         for timing_point in timing_points:
-            if timing_point.time <= self.time:
-                if timing_point.uninherited:
-                    beat_length = timing_point.beat_length
+            time, beat_length, uninherited = timing_point
+            if time <= self.time:
+                if uninherited:
+                    beat_length = beat_length
                 else:
-                    slider_velocity = -100 / timing_point.beat_length
+                    slider_velocity = -100 / beat_length
         slide_duration = (self.length / (slider_multiplier * 100 * slider_velocity)) * beat_length
         total_duration = int(slide_duration * self.slides)
+        
         self.repeat_points = []
         for i in range(1, self.slides):
             repeat_time = self.time + int(slide_duration * i)
-            is_reverse = i % 2 == 1
+            is_reverse = i % 2 == 0
             
             path_points = self.calculate_path_points()
             if is_reverse:
@@ -238,4 +249,5 @@ class Slider(HitObject):
             )
             self.repeat_points.append(repeat_point)
             
+        self._duration = total_duration
         return total_duration

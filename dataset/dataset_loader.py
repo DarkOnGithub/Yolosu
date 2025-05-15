@@ -28,7 +28,9 @@ class DatasetLoader:
     def load_data(self):
         """Lazily load the data file when needed."""
         if self.data_content is None:
+            print(f"Loading data from {self.data_path}")
             with open(self.data_path, 'r') as f:
+                print("content of size", len(f.read()))
                 self.data_content = json.load(f)
 
     def decode_base64_to_image(self, base64_string: str) -> np.ndarray:

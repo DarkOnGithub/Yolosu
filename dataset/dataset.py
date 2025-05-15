@@ -191,7 +191,7 @@ class Dataset:
                         )
                         
                         player = Player(beatmap=beatmap, difficulty=difficulty, config=config)
-                        player.play(visualize=visualize)
+                        player.play(visualize=False)
                         
                         writer.save()
                         

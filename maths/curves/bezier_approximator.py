@@ -66,7 +66,7 @@ class BezierApproximator:
                 continue
 
             right = free_buffers.pop() if free_buffers else np.empty((self.count, 2), dtype=np.float32)
-            left = np.empty_like(parent)  # Create left array with same shape as parent
+            left = np.empty_like(parent) 
 
             self.subdivide(parent, left, right)
 

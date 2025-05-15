@@ -18,6 +18,121 @@ from .beatmap import Beatmap
 from dataset.dataset_writer import DatasetWriter
 from .objects.approaching_circle import ApproachCircle
 from .objects.repeat_point import RepeatPoint
+import multiprocessing as mp
+from multiprocessing import Pool, cpu_count, Manager
+from functools import partial
+
+# Global variables for worker initialization
+_g_video_path: str
+_g_fps: float
+_g_start_time: int
+_g_hit_objects: List  # List[HitObject]
+_g_approach_time: float
+_g_radius: float
+_g_resolution: Tuple[int, int]
+_g_slider_multiplier: float
+_g_timing_points: List  # List of timing point tuples
+_g_dataset_writer = None
+_g_shared_data = None
+_g_shared_index = None
+
+def init_worker(video_path: str, fps: float, start_time: int,
+                hit_objects: List, approach_time: float,
+                radius: float, resolution: Tuple[int, int],
+                slider_multiplier: float, timing_points: List,
+                dataset_dir: str, config, beatmap, difficulty):
+    """Initialize globals for each worker process"""
+    global _g_video_path, _g_fps, _g_start_time, _g_hit_objects
+    global _g_approach_time, _g_radius, _g_resolution
+    global _g_slider_multiplier, _g_timing_points, _g_dataset_writer
+    global _g_shared_data, _g_shared_index
+
+    _g_video_path = video_path
+    _g_fps = fps
+    _g_start_time = start_time
+    _g_hit_objects = hit_objects
+    _g_approach_time = approach_time
+    _g_radius = radius
+    _g_resolution = resolution
+    _g_slider_multiplier = slider_multiplier
+    _g_timing_points = timing_points
+
+
+    from dataset.dataset_writer import DatasetWriter
+    # Create writer with shared data structures
+    _g_dataset_writer = DatasetWriter(dataset_path=dataset_dir, config=config,
+                                     beatmap=beatmap, difficulty=difficulty)
+
+def is_visible(obj, current_time: int, frame_end_time: int) -> bool:
+    """Helper function to determine if an object should be visible"""
+    visibility_start = obj.time - _g_approach_time
+    hit_end_time = obj.time
+    
+    if isinstance(obj, Slider):
+        hit_end_time = obj.time + obj.calculate_duration(
+            _g_slider_multiplier,
+            _g_timing_points
+        )
+        
+        for repeat_point in obj.repeat_points:
+            repeat_visibility_start = repeat_point.time - _g_approach_time
+            repeat_min_visibility_time = repeat_visibility_start + (_g_approach_time * 0.3)
+            
+            if (repeat_min_visibility_time <= frame_end_time and
+                repeat_point.time >= current_time):
+                return True
+                
+    elif isinstance(obj, Spinner):
+        hit_end_time = obj.end_time
+        
+    if isinstance(obj, (HitCircle, Slider)):
+        min_approach_time = obj.approaching_circle.appear + (_g_approach_time * 0.3)
+        if (min_approach_time <= frame_end_time and 
+            obj.approaching_circle.time >= current_time):
+            return True
+    
+    min_visibility_time = visibility_start + (_g_approach_time * 0.3)
+    
+    return (min_visibility_time <= frame_end_time and
+            hit_end_time >= current_time)
+
+def update_slider_positions(visible_objects: List[HitObject], current_time: int):
+    """Update slider positions for visible objects"""
+    for obj in visible_objects:
+        if isinstance(obj, Slider) and obj.ball and current_time >= obj.time:
+            duration = obj.calculate_duration(
+                _g_slider_multiplier,
+                _g_timing_points
+            )
+            obj.update_ball_position(current_time, duration)
+
+def process_frame_range(frame_range: Tuple[int, int]):
+    """Worker: process frames in [start, end) and write via global writer"""
+    start_frame, end_frame = frame_range
+    cap = cv2.VideoCapture(_g_video_path)
+    cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
+    ms_per_frame = 1000.0 / _g_fps
+
+    for frame_num in range(start_frame, end_frame):
+        ret, frame = cap.read()
+        if not ret:
+            break
+            
+        current_time = _g_start_time + int(frame_num * ms_per_frame)
+        frame_end_time = current_time + int(ms_per_frame)
+
+        visible_objects = []
+        for obj in _g_hit_objects:
+            if is_visible(obj, current_time, frame_end_time):
+                visible_objects.append(obj)
+            if (obj.time - _g_approach_time) > frame_end_time:
+                break
+
+        update_slider_positions(visible_objects, current_time)
+
+        _g_dataset_writer.write_frame(frame, visible_objects, current_time)
+
+    cap.release()
 
 class Player:
     def __init__(self, beatmap: Beatmap, difficulty: Difficulty, config: Optional[DanserConfig] = None):
@@ -59,6 +174,10 @@ class Player:
             start_time = -min(1800, self.approach_time)
         self.start_time = start_time - 1000
         self.dataset_writer = DatasetWriter(self.beatmap, self.difficulty, self.config.dataset_dir, self.config)
+        self.num_processes = cpu_count()
+        self.slider_multiplier = difficulty.difficulty.slider_multiplier
+        self.timing_points = tuple((tp.time, tp.beat_length, tp.uninherited) 
+                                 for tp in difficulty.timing_points.points)
         
     def _generate_video(self) -> str:
         """Generate video using danser"""
@@ -147,6 +266,15 @@ class Player:
                     self.difficulty.difficulty.slider_multiplier,
                     self.difficulty.timing_points.points
                 )
+                
+                for repeat_point in obj.repeat_points:
+                    repeat_visibility_start = repeat_point.time - self.approach_time
+                    repeat_min_visibility_time = repeat_visibility_start + (self.approach_time * 0.3)
+                    
+                    if (repeat_min_visibility_time <= frame_end_time and
+                        repeat_point.time >= current_time):
+                        visible_objects.append(repeat_point)
+                        
             elif isinstance(obj, Spinner):
                 hit_end_time = obj.end_time
                 
@@ -195,11 +323,7 @@ class Player:
             elif obj.curve_type == CurveType.CATMULL:
                 label += " Catmull"
                 color = (255, 255, 0)
-
-            # for c_point in obj.multi_curve.c_points1:
-            #     cx, cy = osu_pixels_to_normal_coords(c_point[0], c_point[1], self.resolution_width, self.resolution_height)
-            #     cx, cy = int(cx), int(cy)
-            #     cv2.circle(overlay, (cx, cy), 10, (0, 0, 0), -1)  
+  
             control_points = [(obj.x, obj.y)] + obj.control_points
             for i, (cx, cy) in enumerate(control_points):
                 cx, cy = osu_pixels_to_normal_coords(cx, cy, self.resolution_width, self.resolution_height)
@@ -212,17 +336,13 @@ class Player:
                 rx, ry = osu_pixels_to_normal_coords(repeat_point.x, repeat_point.y, 
                                                    self.resolution_width, self.resolution_height)
                 rx, ry = int(rx), int(ry)
-                
-                # Draw repeat point circle
                 repeat_color = (0, 255, 255) if repeat_point.is_reverse else (255, 255, 0)
-                # cv2.rectangle(overlay, (rx, ry), (rx, ry), repeat_color, 2)
-                
-                # Draw repeat point label
+                cv2.rectangle(overlay, (rx, ry), (rx, ry), repeat_color, 2)
                 label = f"R{i+1}"
                 if repeat_point.is_reverse:
-                    label += "R"  # R for reverse
-                # cv2.putText(overlay, label, (rx+5, ry+5),
-                #           cv2.FONT_HERSHEY_SIMPLEX, 0.5, repeat_color, 1)
+                    label += "R"
+                cv2.putText(overlay, label, (rx+5, ry+5),
+                          cv2.FONT_HERSHEY_SIMPLEX, 0.5, repeat_color, 1)
             
             path_points = obj.calculate_path_points(1000)
             for i in range(len(path_points)-1):
@@ -237,7 +357,7 @@ class Player:
                 ball_x1, ball_y1 = osu_pixels_to_normal_coords(ball_x1, ball_y1, self.resolution_width, self.resolution_height)
                 ball_x2, ball_y2 = osu_pixels_to_normal_coords(ball_x2, ball_y2, self.resolution_width, self.resolution_height)
                 ball_x1, ball_y1, ball_x2, ball_y2 = map(int, [ball_x1, ball_y1, ball_x2, ball_y2])
-                #add cross
+
                 cv2.line(overlay, (ball_x1, ball_y1), (ball_x2, ball_y2), (255, 0, 255), 4)
                 cv2.line(overlay, (ball_x1, ball_y2), (ball_x2, ball_y1), (255, 0, 255), 4)
                 cv2.rectangle(overlay, (ball_x1, ball_y1), (ball_x2, ball_y2), (255, 0, 255), 4)
@@ -247,9 +367,9 @@ class Player:
         elif isinstance(obj, RepeatPoint):
             label += f" {'R' if obj.is_reverse else 'F'}{obj.edge_index}"
             color = (0, 255, 255) if obj.is_reverse else (255, 255, 0)
-        if isinstance(obj, Slider):
-            cv2.rectangle(overlay, (x1, y1), (x2, y2), color, 2)
-            cv2.putText(overlay, label, (x1, y1-5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
+
+        cv2.rectangle(overlay, (x1, y1), (x2, y2), color, 2)
+        cv2.putText(overlay, label, (x1, y1-5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
         
         cv2.addWeighted(overlay, alpha, frame, 1-alpha, 0, frame)
         
@@ -284,29 +404,53 @@ class Player:
                 return paused, playback_speed, current_frame - 1
         return paused, playback_speed, current_frame
 
+    def _play_processing(self):
+        """Handle processing mode with multiprocessing"""
+        self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 3)
+        
+        chunk_size = max(1, self.frame_count // (self.num_processes * 4))
+        frame_ranges = [(i, min(i + chunk_size, self.frame_count)) 
+                       for i in range(0, self.frame_count, chunk_size)]
+        
+        initargs = (
+            self.video_path,
+            self.fps,
+            self.start_time,
+            tuple(self.hit_objects),          
+            self.approach_time,
+            self.radius,
+            (self.resolution_width, self.resolution_height),
+            self.slider_multiplier,
+            tuple(self.timing_points),          
+            self.config.dataset_dir,
+            self.config,
+            self.beatmap,
+            self.difficulty
+        )
+        
+        with Pool(processes=self.num_processes, initializer=init_worker, initargs=initargs) as pool:
+            for _ in tqdm(pool.imap_unordered(process_frame_range, frame_ranges), 
+                         total=len(frame_ranges), desc="Processing frames"):
+                pass
+        
+        self.cap.release()
+
     def play(self, visualize: bool = False):
         """Play the video with bounding boxes and player controls.
         When visualize=False, it runs in dataset creation mode without any window rendering."""
+        if visualize:
+            self._play_visualization()
+        else:
+            self._play_processing()
+
+    def _play_visualization(self):
+        """Handle visualization mode with interactive controls"""
         current_frame = 0
         paused = False
         playback_speed = 1.0
 
-        if not visualize:
-            self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 3)
-
-        if not visualize:
-            pbar = tqdm(total=self.frame_count, desc="Processing frames", unit="frames")
         cv2.namedWindow('Osu! Gameplay', cv2.WINDOW_NORMAL)
         cv2.resizeWindow('Osu! Gameplay', 1920, 1080)
-        
-        def update_sliders(current_time: int, visible_objects: List[HitObject]):
-            for obj in visible_objects:
-                if isinstance(obj, Slider) and obj.ball and current_time >= obj.time:
-                    duration = obj.calculate_duration(
-                        self.difficulty.difficulty.slider_multiplier,
-                        self.difficulty.timing_points.points
-                    )
-                    obj.update_ball_position(current_time, duration)
         
         while True:
             if not paused:
@@ -316,53 +460,47 @@ class Player:
                 
                 current_time = self.start_time + int(self.cap.get(cv2.CAP_PROP_POS_FRAMES) * 1000 / self.fps)
                 visible_objects = self.get_current_objects(current_time)
-                update_sliders(current_time - 16, visible_objects)
+                self.update_sliders(current_time - 16, visible_objects)
                 
-                if visualize:
-                    self.draw_frame_info(frame, playback_speed, current_frame, current_time)
-                    self.visualize_frame(frame, current_time)
-                    cv2.imshow('Osu! Gameplay', frame)
-                else:
-                    self.process_frame(frame, current_time, visible_objects)
-                    pbar.update(1)
+                self.draw_frame_info(frame, playback_speed, current_frame, current_time)
+                self.visualize_frame(frame, current_time)
+                cv2.imshow('Osu! Gameplay', frame)
                 
                 current_frame += 1
             
-            if visualize:
-                wait_time = int(1000 / (self.fps * playback_speed))
-                key = cv2.waitKey(wait_time) & 0xFF
-                
-                paused, playback_speed, current_frame = self.handle_playback_controls(key, paused, playback_speed, current_frame)
-                
-                if key == ord('q'):
-                    break
-                
-                if paused and (key == ord('f') or key == ord('b')):
-                    current_time = self.start_time + int(self.cap.get(cv2.CAP_PROP_POS_FRAMES) * 1000 / self.fps)
-                    visible_objects = self.get_current_objects(current_time)
-                    update_sliders(current_time, visible_objects)
-                    
-                    self.cap.set(cv2.CAP_PROP_POS_FRAMES, current_frame)
-                    ret, frame = self.cap.read()
-                    if ret:
-                        self.visualize_frame(frame, current_time)
-                        self.draw_frame_info(frame, playback_speed, current_frame, current_time)
-                        cv2.imshow('Osu! Gameplay', frame)
-            else:
-                if current_frame >= self.frame_count:
-                    break
-        
-        if not visualize:
-            pbar.close()
+            wait_time = int(1000 / (self.fps * playback_speed))
+            key = cv2.waitKey(wait_time) & 0xFF
             
+            paused, playback_speed, current_frame = self.handle_playback_controls(key, paused, playback_speed, current_frame)
+            
+            if key == ord('q'):
+                break
+            
+            if paused and (key == ord('f') or key == ord('b')):
+                current_time = self.start_time + int(self.cap.get(cv2.CAP_PROP_POS_FRAMES) * 1000 / self.fps)
+                visible_objects = self.get_current_objects(current_time)
+                self.update_sliders(current_time, visible_objects)
+                
+                self.cap.set(cv2.CAP_PROP_POS_FRAMES, current_frame)
+                ret, frame = self.cap.read()
+                if ret:
+                    self.visualize_frame(frame, current_time)
+                    self.draw_frame_info(frame, playback_speed, current_frame, current_time)
+                    cv2.imshow('Osu! Gameplay', frame)
+        
         self.cap.release()
-        if visualize:
-            cv2.destroyAllWindows()
-        self.dataset_writer.save()
+        cv2.destroyAllWindows()
 
-    def process_frame(self, frame: np.ndarray, current_time: float, visible_objects: List[HitObject]):
-        self.dataset_writer.write_frame(frame, visible_objects, current_time)
-    
+    def update_sliders(self, current_time: int, visible_objects: List[HitObject]):
+        """Update slider positions for visible objects"""
+        for obj in visible_objects:
+            if isinstance(obj, Slider) and obj.ball and current_time >= obj.time:
+                duration = obj.calculate_duration(
+                    self.difficulty.difficulty.slider_multiplier,
+                    self.difficulty.timing_points.points
+                )
+                obj.update_ball_position(current_time, duration)
+
     def __del__(self):
         """Cleanup when object is destroyed"""
         if hasattr(self, 'cap'):

@@ -164,7 +164,7 @@ class TimingPointsSection(Section):
         for line in content.split('\n'):
             if ',' in line:
                 parts = line.split(',')
-                time = int(parts[0].strip())
+                time = (float(parts[0].strip()))
                 beat_length = float(parts[1].strip())
                 meter = int(parts[2].strip())
                 sample_set = int(parts[3].strip())

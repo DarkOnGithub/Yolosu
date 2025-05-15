@@ -6,21 +6,22 @@ from enum import IntEnum
 import bisect
 from .linear import Linear
 import cv2
+import numpy as np
 
-def process_bezier(points: List[Tuple[float, float]]) -> List[Tuple[float, float]]:
+def process_bezier(points: np.ndarray) -> np.ndarray:
     out_points = []
     last_index = 0
     for i in range(len(points)):
-        multi = i < len(points) - 2 and points[i] == points[i + 1]
+        multi = i < len(points) - 2 and np.array_equal(points[i], points[i + 1])
         if multi or i == len(points) - 1:
             sub_points = points[last_index:i + 1]
             if len(sub_points) == 2:
                 inter = sub_points
             else:
                 approximator = BezierApproximator(sub_points)
-                inter = approximator.create_bezier()
+                inter = np.array(approximator.create_bezier())
 
-            if len(out_points) == 0 or out_points[-1] != inter[0]:
+            if len(out_points) == 0 or not np.array_equal(out_points[-1], inter[0]):
                 out_points.extend(inter)
             else:
                 out_points.extend(inter[1:])
@@ -29,24 +30,25 @@ def process_bezier(points: List[Tuple[float, float]]) -> List[Tuple[float, float
                 i += 1
             last_index = i 
 
-    return out_points
+    return np.array(out_points)
 
-def process_linear(points: List[Tuple[float, float]]) -> List[Tuple[float, float]]:
-    out_points = []
-    for i in range(len(points)):
-        if i < len(points) - 1 and points[i] == points[i + 1]:  
-            continue
-        out_points.append(points[i])
-    return out_points
+def process_linear(points: List[Tuple[float, float]]) -> np.ndarray:
+    if not isinstance(points, np.ndarray):
+        points = np.array(points)
+    mask = np.ones(len(points), dtype=bool)
+    for i in range(len(points) - 1):
+        if np.array_equal(points[i], points[i + 1]):
+            mask[i] = False
+    return points[mask]
 
-def approximate_circular_arc(pt1: Tuple[float, float], pt2: Tuple[float, float], pt3: Tuple[float, float], detail: float = 0.5) -> List[Tuple[float, float]]:
+def approximate_circular_arc(pt1: np.ndarray, pt2: np.ndarray, pt3: np.ndarray, detail: float = 0.5) -> np.ndarray:
     arc = CircularArc(pt1, pt2, pt3)
     
     if arc.unstable:
-        return [pt1, pt2, pt3]
+        return np.array([pt1, pt2, pt3])
         
     segments = int(abs(arc.total_angle * arc.r) * detail)
-    points = [None] * (segments + 1)
+    points = np.zeros((segments + 1, 2))
     
     points[0] = pt1
     points[segments] = pt3
@@ -56,7 +58,7 @@ def approximate_circular_arc(pt1: Tuple[float, float], pt2: Tuple[float, float],
         
     return points
 
-def process_perfect(points: List[Tuple[float, float]]) -> List[Tuple[float, float]]:
+def process_perfect(points: np.ndarray) -> np.ndarray:
     if len(points) > 3:
         return process_bezier(points)
     elif len(points) < 3 or CircularArc(points[0], points[1], points[2])._is_straight_line(points[0], points[1], points[2]):
@@ -73,50 +75,45 @@ class CurveType(IntEnum):
 class CurveDef:
     def __init__(self, curve_type: CurveType, points: List[Tuple[float, float]]):
         self.curve_type = curve_type
-        self.points = points
+        self.points = np.array(points)
     
-def process_catmull(points: List[Tuple[float, float]]) -> List[Tuple[float, float]]:
+def process_catmull(points: np.ndarray) -> np.ndarray:
     out_points = []
     
     for i in range(len(points) - 1):
         p1 = points[i - 1] if i - 1 >= 0 else points[i]
         p2 = points[i]
-        p3 = points[i + 1] if i + 1 < len(points) else (
-            p2[0] + (p2[0] - p1[0]),
-            p2[1] + (p2[1] - p1[1])
-        )
-        p4 = points[i + 2] if i + 2 < len(points) else (
-            p3[0] + (p3[0] - p2[0]),
-            p3[1] + (p3[1] - p2[1])
-        )
+        p3 = points[i + 1] if i + 1 < len(points) else p2 + (p2 - p1)
+        p4 = points[i + 2] if i + 2 < len(points) else p3 + (p3 - p2)
         
-        # Approximate Catmull-Rom curve with 100 points (increased from 50)
-        for t in range(100):
-            t = t / 99.0
-            point = (
-                (-0.5 * p1[0] + 1.5 * p2[0] - 1.5 * p3[0] + 0.5 * p4[0]) * t**3 +
-                (p1[0] - 2.5 * p2[0] + 2 * p3[0] - 0.5 * p4[0]) * t**2 +
-                (-0.5 * p1[0] + 0.5 * p3[0]) * t +
-                p2[0],
-                (-0.5 * p1[1] + 1.5 * p2[1] - 1.5 * p3[1] + 0.5 * p4[1]) * t**3 +
-                (p1[1] - 2.5 * p2[1] + 2 * p3[1] - 0.5 * p4[1]) * t**2 +
-                (-0.5 * p1[1] + 0.5 * p3[1]) * t +
-                p2[1]
-            )
-            out_points.append(point)
+        t = np.linspace(0, 1, 100)
+        t3 = t**3
+        t2 = t**2
+        
+        x = (-0.5 * p1[0] + 1.5 * p2[0] - 1.5 * p3[0] + 0.5 * p4[0]) * t3 + \
+            (p1[0] - 2.5 * p2[0] + 2 * p3[0] - 0.5 * p4[0]) * t2 + \
+            (-0.5 * p1[0] + 0.5 * p3[0]) * t + \
+            p2[0]
             
-    return out_points
+        y = (-0.5 * p1[1] + 1.5 * p2[1] - 1.5 * p3[1] + 0.5 * p4[1]) * t3 + \
+            (p1[1] - 2.5 * p2[1] + 2 * p3[1] - 0.5 * p4[1]) * t2 + \
+            (-0.5 * p1[1] + 0.5 * p3[1]) * t + \
+            p2[1]
+            
+        out_points.extend(np.column_stack((x, y)))
+            
+    return np.array(out_points)
 
 class MultiCurve:
     MIN_PART_WIDTH = 0.0001
 
-    def __init__(self, curve_defs: List[CurveDef]):
+    def __init__(self, curve_defs: List[CurveDef], length: float):
         self.lines: List[Linear] = []
-        self.points: List[Tuple[float, float]] = []
-        self.sections: List[float] = []
+        self.points: np.ndarray = np.array([])
+        self.sections: np.ndarray = np.array([])
         self.length: float = 0.0
-        self.cum_length: List[float] = []
-        self.first_point: Tuple[float, float] = curve_defs[0].points[0] if curve_defs else (0.0, 0.0)
+        self.cum_length: np.ndarray = np.array([])
+        self.first_point: np.ndarray = curve_defs[0].points[0] if curve_defs else np.array([0.0, 0.0])
 
         for curve_def in curve_defs:
             c_points1 = self._process_curve(curve_def, False)
@@ -129,28 +126,25 @@ class MultiCurve:
                 n_lines[len(self.lines) + i] = Linear(c_points1[i], c_points1[i + 1])
             self.lines = n_lines
 
-            skip = 1 if self.points and self.points[-1] == c_points2[0] else 0
-            n_points = [None] * (len(self.points) + len(c_points2) - skip)
-            n_points[:len(self.points)] = self.points
-            n_points[len(self.points):] = c_points2[skip:]
-            self.points = n_points
+            skip = 1 if len(self.points) > 0 and np.array_equal(self.points[-1], c_points2[0]) else 0
+            if len(self.points) == 0:
+                self.points = c_points2
+            else:
+                self.points = np.vstack((self.points, c_points2[skip:]))
 
-        self.length = sum(line.get_length() for line in self.lines)
-
-        self.cum_length = [0.0] * max(1, len(self.points))
-        for i in range(len(self.points) - 1):
-            self.cum_length[i + 1] = self.cum_length[i] + math.sqrt(
-                (self.points[i + 1][0] - self.points[i][0])**2 + 
-                (self.points[i + 1][1] - self.points[i][1])**2
-            )
+        self.length = length
+        self.cum_length = np.zeros(max(1, len(self.points)))
+        if len(self.points) > 1:
+            diffs = np.diff(self.points, axis=0)
+            self.cum_length[1:] = np.cumsum(np.sqrt(np.sum(diffs**2, axis=1)))
         
-        self.sections = [0.0] * (len(self.lines) + 1)
+        self.sections = np.zeros(len(self.lines) + 1)
         prev = 0.0
         for i in range(len(self.lines)):
             prev += self.lines[i].get_length()
             self.sections[i + 1] = prev
         
-    def _process_curve(self, curve_def: CurveDef, lazer: bool) -> List[Tuple[float, float]]:
+    def _process_curve(self, curve_def: CurveDef, lazer: bool) -> np.ndarray:
         if curve_def.curve_type == CurveType.CIRCULAR_ARC:
             return process_perfect(curve_def.points)
         elif curve_def.curve_type == CurveType.LINE:
@@ -159,9 +153,9 @@ class MultiCurve:
             return process_bezier(curve_def.points)
         elif curve_def.curve_type == CurveType.CATMULL:
             return process_catmull(curve_def.points)
-        return []
+        return np.array([])
 
-    def point_at(self, t: float) -> Tuple[float, float]:
+    def point_at(self, t: float) -> np.ndarray:
         if not self.lines or self.length == 0:
             return self.first_point
 
@@ -181,7 +175,7 @@ class MultiCurve:
         return self.length
 
     def get_length_lazer(self) -> float:
-        return self.cum_length[-1] if self.cum_length else 0.0
+        return self.cum_length[-1] if len(self.cum_length) > 0 else 0.0
 
     def get_start_angle(self) -> float:
         return self.lines[0].get_start_angle() if self.lines else 0.0
@@ -194,7 +188,7 @@ class MultiCurve:
 
     def _get_line_at(self, t: float) -> Linear:
         if not self.lines:
-            return Linear((0.0, 0.0), (0.0, 0.0))
+            return Linear(np.array([0.0, 0.0]), np.array([0.0, 0.0]))
 
         desired_width = self.length * max(0.0, min(1.0, t))
         index = bisect.bisect_left(self.sections[1:], desired_width)
