@@ -13,13 +13,12 @@ class Socket:
         self.socket_url = socket_url
         self.ws = None
         self.connected = False
-        # self.start_tosu()
+        self.start_tosu()
         
     def start_tosu(self):
         subprocess.Popen([TOSU_PATH])
         
     def connect(self):
-        print(self.socket_url)
         self.ws = websocket.WebSocketApp(
             self.socket_url,
             on_message=self._on_message,
@@ -34,7 +33,6 @@ class Socket:
 
     def _on_message(self, ws, message):
         try:
-            print(message)
             data = json.loads(message)
             self.callback(data)
         except Exception as e:
