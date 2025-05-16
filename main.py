@@ -6,7 +6,6 @@ from emulator.objects.base import HitObjectType
 from emulator.player import Player
 from emulator.config import DanserConfig
 import setup
-from dataset import dataset_loader, dataset_writer
 
 
 handler = colorlog.StreamHandler()
@@ -34,7 +33,8 @@ handler.setFormatter(colorlog.ColoredFormatter(
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
-logger.handlers = [handler]  
+logger.handlers = [handler]
+
 config = DanserConfig(
     width=416,
     height=234,
@@ -45,37 +45,18 @@ config = DanserConfig(
     skin="Aristia(Edit)+trail"
 )
 
-def _main():
-    from dataset.dataset import Dataset
-
-    dataset = Dataset.create_from_beatmaps(
-        beatmaps_folder="./beatmaps", 
-        output_folder="./dataset_yolo", 
-        config=config, 
-        num_beatmaps=10, 
-        difficulties_per_beatmap=3, 
-        visualize=False,
-        object_counts={
-            'circle': 5000,
-            'slider': 5000,
-            'spinner': 2500,
-            'approaching_circle': 5000,
-            'ball': 5000,
-            'repeat_point': 5000
-        }
-    )
-    dataset.export_yolo(output_folder="./dataset_yolo_export", split_ratio=0.8)
+from model.reinforcement_learning.config import RL_Config
+from model.reinforcement_learning.tracker import Tracker
+from model.inference import Inference
+WEIGHT_PATH = r"runs\detect\train6\weights\best.engine"
 
 
-    Dataset.create_visualization_video(
-        yolo_dataset_path="./dataset_yolo_export",
-        output_path="./dataset_yolo_export/visualization.mp4",
-        fps=1
-    )
-    
 def main():
-    from model.reinforcement_learning.game_state import GameState
-    state = GameState()
+    inference = Inference(config=RL_Config(
+        classes=["circle", "slider", "spinner", "approaching_circle", "ball", "repeat_point"],
+    ))
+    inference.run()
+
 
 if __name__ == "__main__":
     main()

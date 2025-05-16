@@ -1,9 +1,8 @@
 from .socket import Socket
 import time
 from dataclasses import dataclass
-from typing import List, Dict
 import queue
-import time
+from typing import List, Dict
 
 WEBSOCKET_URL = "ws://localhost:24050/websocket/v2/precise"
 
@@ -47,20 +46,20 @@ class GameInfo:
             hit_errors=data['hitErrors']
         )
 
+
 class GameState:
-    def __init__(self):       
+    def __init__(self):
         self.socket_receiver = Socket(WEBSOCKET_URL, self.on_message_callback)
         self.socket_receiver.connect()
-        self.last_packet_epoch = int(time.time() * 1000)
-
         self.socket_queue = queue.Queue(maxsize=10)
+        self.class_to_id = {name: idx for idx, name in enumerate(self.classes)}
+
+        self.accuracy = 0
         
         while True:
             time.sleep(1)
 
     def on_message_callback(self, message):
         info_socket = GameInfo.from_dict(message)
-        print(info_socket.epoch, info_socket.accuracy, "time between packet", f"{info_socket.epoch - self.last_packet_epoch}ms", end="\r")
         self.last_packet_epoch = info_socket.epoch
-        print(len(str(info_socket)))
-    
+
