@@ -3,7 +3,8 @@ import time
 from dataclasses import dataclass
 import queue
 from typing import List, Dict
-
+from model.reinforcement_learning.config import RL_Config
+from utils.time_queue import TimeQueue
 WEBSOCKET_URL = "ws://localhost:24050/websocket/v2/precise"
 
 @dataclass
@@ -24,7 +25,8 @@ class GameInfo:
     difficulty: str
     checksum: str
     hit_errors: List[float]
-
+    game_state: int
+    
     @classmethod
     def from_dict(cls, data: Dict) -> 'GameInfo':
         return cls(
@@ -43,23 +45,22 @@ class GameInfo:
             title=data['title'],
             difficulty=data['difficulty'],
             checksum=data['checksum'],
-            hit_errors=data['hitErrors']
+            hit_errors=data['hitErrors'],
+            game_state=data['gameState']
         )
 
 
 class GameState:
-    def __init__(self):
+    def __init__(self, config: RL_Config):
         self.socket_receiver = Socket(WEBSOCKET_URL, self.on_message_callback)
         self.socket_receiver.connect()
-        self.socket_queue = queue.Queue(maxsize=10)
-        self.class_to_id = {name: idx for idx, name in enumerate(self.classes)}
+        self.info_queue = TimeQueue()
+        self.class_to_id = {name: idx for idx, name in enumerate(config.classes)}
 
         self.accuracy = 0
-        
-        while True:
-            time.sleep(1)
+    
 
     def on_message_callback(self, message):
         info_socket = GameInfo.from_dict(message)
-        self.last_packet_epoch = info_socket.epoch
+        self.info_queue.add(info_socket, timestamp=info_socket.epoch)
 
