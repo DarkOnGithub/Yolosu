@@ -37,17 +37,16 @@ class Socket:
             time.sleep(0.01)
 
     def _on_open(self, ws):
-        ws.sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        print(ws.sock)
+        ws.sock.sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
 
         print("WebSocket connection established")
         self.connected = True
-        # If you really want the game to start only once the socket is good:
         self.start_tosu()
 
     def _on_message(self, ws, message):
         try:
             data = json.loads(message)
-            print(f"Received epoch: {data['epoch']}")
             self.callback(data)
         except Exception as e:
             print(f"Error processing websocket message: {e}")

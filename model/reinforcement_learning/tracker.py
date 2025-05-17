@@ -9,7 +9,6 @@ import time
 from collections import deque
 from dataclasses import dataclass
 import sys
-from utils.time_queue import TimeQueue
 
 @dataclass
 class TrackResult:

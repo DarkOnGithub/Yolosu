@@ -4,7 +4,9 @@ from dataclasses import dataclass
 import queue
 from typing import List, Dict
 from model.reinforcement_learning.config import RL_Config
-from utils.time_queue import TimeQueue
+import enum
+
+
 WEBSOCKET_URL = "ws://localhost:24050/websocket/v2/precise"
 
 @dataclass
@@ -50,16 +52,18 @@ class GameInfo:
         )
 
 
+
 class GameState:
     def __init__(self, config: RL_Config):
         self.socket_receiver = Socket(WEBSOCKET_URL, self.on_message_callback)
-        self.socket_receiver.connect()
-        self.last_game_info = None
-                
-    
+        self._last_game_info = None
 
+    def start_capture(self):
+        self.socket_receiver.connect()
+        
     def on_message_callback(self, message):
         info_socket = GameInfo.from_dict(message)
-        self.last_game_info = info_socket
-        print(int(time.time() * 1000)- info_socket.epoch, info_socket.accuracy)
+        self._last_game_info = info_socket
 
+    def get_last_game_info(self):
+        return self._last_game_info

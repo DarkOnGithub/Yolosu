@@ -2,7 +2,11 @@ from model.reinforcement_learning.config import RL_Config
 from model.reinforcement_learning.game_state import GameState
 from model.reinforcement_learning.tracker import Tracker
 import utils
+from enum import Enum
 
+class SessionState(Enum):
+    TRACKING = 0
+    
 class Session:
     def __init__(self, config: RL_Config, game_state: GameState):
         self.config = config
