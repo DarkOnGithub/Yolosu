@@ -6,7 +6,6 @@ import time
 class Inference:
     def __init__(self, config: RL_Config):
         self.config = config
-        self.tracker = Tracker(config=config)
         self.game_state = GameState(config=config)
         
     

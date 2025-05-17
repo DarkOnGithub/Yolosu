@@ -3,7 +3,7 @@ import threading
 import json
 import time
 import subprocess
-
+import socket
 
 TOSU_PATH = "tosu/tosu.exe"
 
@@ -13,12 +13,11 @@ class Socket:
         self.socket_url = socket_url
         self.ws = None
         self.connected = False
-        self.start_tosu()
-        
+
     def start_tosu(self):
         subprocess.Popen([TOSU_PATH])
-        
-    def connect(self):
+
+    def connect(self, timeout=5.0):
         self.ws = websocket.WebSocketApp(
             self.socket_url,
             on_message=self._on_message,
@@ -26,26 +25,37 @@ class Socket:
             on_close=self._on_close,
             on_open=self._on_open
         )
-        
+
         self.ws_thread = threading.Thread(target=self.ws.run_forever)
         self.ws_thread.daemon = True
         self.ws_thread.start()
 
+        start = time.time()
+        while not self.connected:
+            if time.time() - start > timeout:
+                raise TimeoutError(f"WebSocket failed to open in {timeout}s")
+            time.sleep(0.01)
+
+    def _on_open(self, ws):
+        ws.sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+
+        print("WebSocket connection established")
+        self.connected = True
+        # If you really want the game to start only once the socket is good:
+        self.start_tosu()
+
     def _on_message(self, ws, message):
         try:
             data = json.loads(message)
+            print(f"Received epoch: {data['epoch']}")
             self.callback(data)
         except Exception as e:
             print(f"Error processing websocket message: {e}")
-    
+
     def _on_error(self, ws, error):
         print(f"WebSocket error: {error}")
         self.connected = False
-    
+
     def _on_close(self, ws, close_status_code, close_msg):
         print("WebSocket connection closed")
         self.connected = False
-    
-    def _on_open(self, ws):
-        print("WebSocket connection established")
-        self.connected = True

@@ -3,13 +3,15 @@ import threading
 import dxcam
 import cv2
 import numpy as np
+from typing import List
 from .config import RL_Config
 import time
 from collections import deque
 from dataclasses import dataclass
 import sys
 from utils.time_queue import TimeQueue
-@dataclass(slots=True)
+
+@dataclass
 class TrackResult:
     epoch: int
     x1: int
@@ -21,18 +23,23 @@ class TrackResult:
     conf: float
 
 class Tracker:
-    def __init__(self, config: RL_Config) -> None:
+    def __init__(self, config: RL_Config, output_objects: List[TrackResult]) -> None:
         self.config = config
         self.recorder = dxcam.create(device_idx=config.device_idx, output_color="BGR")
         self.model = YOLO(config.weight_path)
         self.thread = threading.Thread(target=self.run)
         self.thread.daemon = True
         self.thread.start()
-        self.tracked_objects = []
+        self.queue = deque()
+        self.is_running = False
+        self.tracked_objects = output_objects
         
     def run(self):
         self.recorder.start(target_fps=120)
         while True:
+            if not self.is_running:
+                time.sleep(0.1)
+                continue
             frame = self.recorder.get_latest_frame()
             result = self.model.track(frame, persist=True, **self.config.yolo_config, verbose=False)
             
@@ -52,3 +59,12 @@ class Tracker:
                     conf=conf
                 )
                 self.tracked_objects.append(track_result)
+
+    def pause(self):
+        self.is_running = False
+        self.recorder.stop()
+
+    def resume(self):
+        self.is_running = True
+        self.recorder.start(target_fps=120)
+

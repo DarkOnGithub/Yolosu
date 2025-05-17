@@ -1,3 +1,5 @@
+import win32gui
+
 def osu_pixels_to_normal_coords(osu_x, osu_y, resolution_width, resolution_height):
     OSU_WIDTH = 512
     OSU_HEIGHT = 384
@@ -9,3 +11,6 @@ def osu_pixels_to_normal_coords(osu_x, osu_y, resolution_width, resolution_heigh
     screen_x = playfield_left + (osu_x * scale)
     screen_y = playfield_top + (osu_y * scale)
     return screen_x, screen_y
+
+def get_active_window_name():
+    return win32gui.GetWindowText(win32gui.GetForegroundWindow())

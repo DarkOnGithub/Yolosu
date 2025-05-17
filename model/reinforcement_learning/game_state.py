@@ -46,7 +46,7 @@ class GameInfo:
             difficulty=data['difficulty'],
             checksum=data['checksum'],
             hit_errors=data['hitErrors'],
-            game_state=data['gameState']
+            game_state=data['game_state']
         )
 
 
@@ -54,13 +54,12 @@ class GameState:
     def __init__(self, config: RL_Config):
         self.socket_receiver = Socket(WEBSOCKET_URL, self.on_message_callback)
         self.socket_receiver.connect()
-        self.info_queue = TimeQueue()
-        self.class_to_id = {name: idx for idx, name in enumerate(config.classes)}
-
-        self.accuracy = 0
+        self.last_game_info = None
+                
     
 
     def on_message_callback(self, message):
         info_socket = GameInfo.from_dict(message)
-        self.info_queue.add(info_socket, timestamp=info_socket.epoch)
+        self.last_game_info = info_socket
+        print(int(time.time() * 1000)- info_socket.epoch, info_socket.accuracy)
 
